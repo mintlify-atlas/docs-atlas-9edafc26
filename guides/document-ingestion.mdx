@@ -1,0 +1,96 @@
+---
+title: "Ingest documents into the Voice Agent knowledge base"
+sidebarTitle: "Document Ingestion"
+description: "Upload PDFs, Word docs, spreadsheets, CSVs, and images to the Voice Agent knowledge base to power semantic search and RAG-backed chat responses."
+---
+
+The Voice Agent knowledge base is built on top of a pgvector table (`document_master`) that stores the full extracted text of each document alongside a 3072-dimensional embedding vector. Once a file is ingested, it becomes instantly searchable by both the chat RAG pipeline and the Bolna webhook tool. This guide covers the supported file types, how ingestion works under the hood, and how to attach files to individual chat sessions.
+
+## Supported file types
+
+Voice Agent accepts the following formats at the `POST /api/upload_documents` endpoint:
+
+| Extension | Type | Notes |
+|-----------|------|-------|
+| `.pdf` | PDF | Text extracted page by page using PyMuPDF and pdfplumber; Gemini 2.5 Flash vision is used as a fallback for scanned or image-heavy pages |
+| `.docx`, `.doc` | Word Document | Paragraph text extracted directly via python-docx; `.doc` files are first converted to PDF via LibreOffice |
+| `.xlsx`, `.xls` | Excel Spreadsheet | All sheets extracted as pipe-delimited rows; `.xls` files are converted to `.xlsx` before processing |
+| `.csv` | CSV | Rows extracted as plain text using pandas |
+| `.jpg`, `.jpeg`, `.png` | Image | Full-page OCR and description via Gemini 2.5 Flash vision |
+
+## How ingestion works
+
+<Steps>
+  <Step title="Upload file(s) via the API">
+    Send a `multipart/form-data` POST request to `POST /api/upload_documents`. You can upload multiple files in a single request; they are processed and stored individually. An optional `project_id` form field is accepted for future grouping.
+  </Step>
+  <Step title="Files are saved to a temporary folder">
+    Each request is assigned a unique UUID. Uploaded files are written to `uploads/<uuid>/` so concurrent uploads never collide.
+  </Step>
+  <Step title="Text is extracted based on file type">
+    The extraction pipeline dispatches each file to the appropriate extractor:
+    - **PDF** — up to 5 pages processed concurrently; PyMuPDF is tried first, pdfplumber as a fallback, and Gemini 2.5 Flash vision if both produce garbage output.
+    - **Word** — paragraphs joined with newlines.
+    - **Excel / CSV** — rows formatted as pipe-delimited text, one sheet section per worksheet.
+    - **Image** — sent directly to the Gemini 2.5 Flash vision model.
+  </Step>
+  <Step title="Text is embedded with Gemini Embeddings">
+    The combined extracted text is passed to `gemini-embedding-001` with `output_dimensionality=3072` and `task_type="retrieval_document"`, producing a single 3072-dimensional vector.
+  </Step>
+  <Step title="Embedding is stored in document_master">
+    A `DocumentMaster` row is created with the `file_name`, full `content` text, and the `embedding` vector column (pgvector `Vector(3072)`). The record is committed and its `id` is returned to the caller.
+  </Step>
+  <Step title="Temporary files are cleaned up">
+    The entire `uploads/<uuid>/` folder is removed in a `finally` block regardless of whether processing succeeded or failed, keeping disk usage in check.
+  </Step>
+</Steps>
+
+### Uploading a PDF
+
+```bash
+curl -X POST http://localhost:8081/api/upload_documents \
+  -H "Authorization: Bearer <token>" \
+  -F "files=@/path/to/document.pdf"
+```
+
+You can upload several files at once by repeating the `-F "files=@..."` flag:
+
+```bash
+curl -X POST http://localhost:8081/api/upload_documents \
+  -H "Authorization: Bearer <token>" \
+  -F "files=@/path/to/spec-sheet.pdf" \
+  -F "files=@/path/to/price-list.xlsx"
+```
+
+## Response format
+
+A successful upload returns the `id` and `file_name` of the saved `document_master` record:
+
+```json
+{
+  "status": "success",
+  "message": "Documents uploaded and embeddings saved",
+  "data": {
+    "id": 42,
+    "file_name": "spec-sheet.pdf"
+  }
+}
+```
+
+<Note>
+  When multiple files are uploaded in one request, they are extracted together and stored as a single combined `document_master` record. The `file_name` reflects the first file in the batch.
+</Note>
+
+## Using documents in chat
+
+Once documents are stored in `document_master`, they are automatically included in every RAG retrieval step performed by the chat pipeline. When a user sends a message via `POST /api/chatConversation`, the backend embeds the query, runs a cosine similarity search against all stored document vectors, and injects the top results into the LLM's context window before generating a reply — no additional configuration is needed.
+
+## Per-session file attachments
+
+In addition to the global knowledge base, users can attach files directly within a chat message using the `file` field of a `multipart/form-data` `chatConversation` request. The attachment follows the same extraction and embedding pipeline described above, but the result is stored in the `chat_attachments` table (linked to the specific chat row via `chat_id`) rather than `document_master`.
+
+During that session the attachment embedding is searched alongside the global knowledge base, giving the model access to content that is private to that conversation thread without polluting the shared document store.
+
+<Tip>
+  Upload your knowledge base documents before placing live Bolna voice calls. The `POST /api/bolna/webhook/tool` endpoint searches `document_master` in real time, so an empty table will always return `"found": false` to the LLM during the call.
+</Tip>

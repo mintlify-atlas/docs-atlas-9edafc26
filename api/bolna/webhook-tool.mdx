@@ -1,0 +1,116 @@
+---
+title: "POST /api/bolna/webhook/tool — knowledge base search webhook"
+sidebarTitle: "KB Webhook"
+description: "Bolna Custom Tool webhook that lets a live voice agent LLM perform semantic search across your ingested knowledge base documents mid-call."
+---
+
+This endpoint is designed to be registered as a **Custom Tool** in the Bolna dashboard, enabling the voice agent's LLM to query your knowledge base in real time during a call. When the agent determines that the caller's question requires looking up stored documents, Bolna automatically issues a `POST` request to this URL with the search query. The server performs a semantic (vector-based) search across all ingested documents and returns the most relevant excerpts in a plain-text format the LLM can read directly.
+
+## Endpoint
+
+```
+POST /api/bolna/webhook/tool
+```
+
+## Authentication
+
+No authentication is required. This endpoint is called by Bolna's servers, not by end users.
+
+## Request Body
+
+<ParamField body="query" type="string" required>
+  The search query to run against the knowledge base. Must be a non-empty string. Bolna populates this automatically from the agent's LLM reasoning. Example: `"What is the return policy for enterprise customers?"`.
+</ParamField>
+
+<ParamField body="top_k" type="integer" optional default={3}>
+  The maximum number of document results to retrieve and return. Defaults to `3`. Increase this value if the agent needs broader context; decrease it to keep responses concise.
+</ParamField>
+
+## Response
+
+<ResponseField name="found" type="boolean">
+  `true` if at least one matching document was found; `false` otherwise.
+</ResponseField>
+
+<ResponseField name="text" type="string">
+  A concatenated string of the top results, each formatted as:
+
+  ```
+  Source: <document title>
+  Content: <extracted text>
+  ```
+
+  Multiple results are separated by a blank line. If no results were found, this field contains the message `"No matching information was found in the knowledge base."`.
+</ResponseField>
+
+## Errors
+
+| HTTP Status | Cause |
+|---|---|
+| `400 Bad Request` | `query` is missing, empty, or contains only whitespace. |
+
+## Example
+
+**Request:**
+
+```json
+{
+  "query": "What is the warranty period for temperature sensors?",
+  "top_k": 2
+}
+```
+
+**Response (documents found):**
+
+```json
+{
+  "found": true,
+  "text": "Source: Product Warranty Guide\nContent: All temperature sensors carry a standard 2-year limited warranty covering manufacturing defects.\n\nSource: FAQ - After Sales Support\nContent: Extended warranty plans of up to 5 years are available for enterprise customers."
+}
+```
+
+**Response (no documents found):**
+
+```json
+{
+  "found": false,
+  "text": "No matching information was found in the knowledge base."
+}
+```
+
+---
+
+## Registering in the Bolna Dashboard
+
+Before the voice agent can use this tool, you need to register it in the Bolna dashboard as a Custom Tool.
+
+<Steps>
+  <Step title="Open Custom Tools">
+    In the Bolna Dashboard, navigate to **Tools → Custom Tools** and click **Add Tool**.
+  </Step>
+  <Step title="Set the endpoint URL">
+    Set the method to `POST` and the URL to:
+    ```
+    https://your-server.com/api/bolna/webhook/tool
+    ```
+    Replace `your-server.com` with your actual server hostname.
+  </Step>
+  <Step title="Define the request schema">
+    Add the following parameters to the tool's input schema:
+
+    | Parameter | Type    | Required | Description                  |
+    |-----------|---------|----------|------------------------------|
+    | `query`   | string  | Yes      | The search query             |
+    | `top_k`   | integer | No       | Number of results (default 3)|
+  </Step>
+  <Step title="Assign the tool to your agent">
+    Open the agent you want to augment, go to its **Tools** tab, and select the newly created knowledge base search tool.
+  </Step>
+  <Step title="Deploy and test">
+    Save the agent configuration. The agent LLM will now call this tool automatically whenever it determines that a knowledge base lookup is needed to answer the caller's question.
+  </Step>
+</Steps>
+
+<Note>
+  Documents must be uploaded via `POST /api/upload_documents` before they become searchable through this webhook. See the [Upload Documents](/api/documents/upload) reference for details.
+</Note>

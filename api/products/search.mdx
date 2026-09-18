@@ -1,0 +1,165 @@
+---
+title: "POST /api/products/search — natural language product search"
+sidebarTitle: "Product Search"
+description: "LLM-powered natural language product search using Gemini 2.5 Flash to parse voice queries before matching against product name, category, and description."
+---
+
+This endpoint accepts a raw natural language query — exactly the kind a caller might speak during a voice interaction — and uses **Gemini 2.5 Flash** to distil it into a precise search keyword before running a case-insensitive pattern match across the product catalogue. It is designed to be registered as a **Custom Tool** in the Bolna dashboard so that voice agents can look up products mid-call without any additional integration work.
+
+## Endpoint
+
+```
+POST /api/products/search
+```
+
+## Authentication
+
+No authentication is required. This endpoint is intended for Bolna tool calls originating from the Bolna platform, not from end users.
+
+## Request Body
+
+<ParamField body="query" type="string" required>
+  The raw natural language search query as spoken or typed by the user. The LLM cleaning step handles filler words, grammar, and vague phrasing automatically. Example: `"what temperature sensors do you have?"`.
+</ParamField>
+
+<ParamField body="top_k" type="integer" optional default={3}>
+  The maximum number of products to return when the query matches a specific term. Defaults to `3`. This limit is ignored when the query resolves to `"all"` — in that case up to 100 products are returned.
+</ParamField>
+
+## LLM Query Cleaning
+
+Before touching the database, the raw `query` is sent to **Gemini 2.5 Flash** with a structured prompt that instructs the model to:
+
+1. Return exactly `"all"` if the user wants to list or browse every product (e.g. *"what products do you offer?"*, *"list everything"*).
+2. Otherwise, extract only the core search keyword(s) (e.g. `"thermocouple"`, `"RTD"`, `"temperature sensor"`).
+
+The cleaned keyword is then used for the database query. If the LLM call fails for any reason, the original raw query is used as the fallback.
+
+## Database Search
+
+The cleaned keyword is matched against four columns of the `products` table using a case-insensitive `ILIKE '%keyword%'` pattern:
+
+| Column         | Description                        |
+|----------------|------------------------------------|
+| `name`         | Product name                       |
+| `category`     | Top-level product category         |
+| `sub_category` | More specific product sub-category |
+| `description`  | Full product description text      |
+
+When the resolved keyword is `"all"` (or a close variant), the `WHERE` clause is omitted and up to 100 products are returned.
+
+## Response
+
+<ResponseField name="found" type="boolean">
+  `true` if one or more products matched the query; `false` if the catalogue contained no results for the resolved keyword.
+</ResponseField>
+
+<ResponseField name="text" type="string">
+  A human-readable, newline-separated list of matching products. Each product entry is formatted as:
+
+  ```
+  Product: <name>
+  Category: <category> -> <sub_category>
+  Description: <description>
+  ```
+
+  Multiple results are separated by a blank line. If no products were found, this field contains a descriptive "not found" message that the voice agent LLM can read back to the caller.
+</ResponseField>
+
+## ProductResponseSchema Fields
+
+| Field          | Type    | Description                        |
+|----------------|---------|------------------------------------|
+| `id`           | integer | Auto-incremented primary key       |
+| `name`         | string  | Product name (max 255 chars)       |
+| `category`     | string  | Top-level category (max 255 chars) |
+| `sub_category` | string  | Sub-category (max 255 chars)       |
+| `description`  | string  | Optional free-text description     |
+
+## Errors
+
+| HTTP Status | Cause |
+|---|---|
+| `400 Bad Request` | `query` is empty or contains only whitespace. |
+| `500 Internal Server Error` | A database error occurred during the search. |
+
+## Example
+
+**Request — specific product type:**
+
+```json
+{
+  "query": "what temperature sensors do you have?",
+  "top_k": 3
+}
+```
+
+**Response:**
+
+```json
+{
+  "found": true,
+  "text": "Product: PT100 RTD Sensor\nCategory: Sensors -> Temperature\nDescription: Industrial-grade PT100 resistance temperature detector for process monitoring.\n\nProduct: Type K Thermocouple\nCategory: Sensors -> Temperature\nDescription: General-purpose Type K thermocouple suitable for temperatures up to 1260°C."
+}
+```
+
+**Request — list all products:**
+
+```json
+{
+  "query": "what products does IDEX offer?",
+  "top_k": 3
+}
+```
+
+**Response:**
+
+```json
+{
+  "found": true,
+  "text": "Product: PT100 RTD Sensor\nCategory: Sensors -> Temperature\nDescription: ...\n\nProduct: Thermowell\nCategory: Accessories -> Protection\nDescription: ..."
+}
+```
+
+**Response — no results:**
+
+```json
+{
+  "found": false,
+  "text": "No products matching 'laser cutter' were found in the database."
+}
+```
+
+---
+
+## Registering as a Bolna Tool
+
+<Steps>
+  <Step title="Open Custom Tools">
+    In the Bolna Dashboard, go to **Tools → Custom Tools** and click **Add Tool**.
+  </Step>
+  <Step title="Set the endpoint URL">
+    Set the method to `POST` and the URL to:
+    ```
+    https://your-server.com/api/products/search
+    ```
+  </Step>
+  <Step title="Define the request schema">
+    Add the following parameters:
+
+    | Parameter | Type    | Required | Description                         |
+    |-----------|---------|----------|-------------------------------------|
+    | `query`   | string  | Yes      | The caller's natural language query |
+    | `top_k`   | integer | No       | Max products to return (default 3)  |
+  </Step>
+  <Step title="Assign the tool to your agent">
+    Open the target agent, navigate to its **Tools** tab, and select the product search tool.
+  </Step>
+  <Step title="Deploy and test">
+    Save your agent. During calls, the agent LLM will automatically invoke this tool when the caller asks about products.
+  </Step>
+</Steps>
+
+<Tip>
+  Register both the [knowledge base webhook](/api/bolna/webhook-tool) and this product search endpoint as separate tools in Bolna. This lets the agent intelligently choose the right data source — product catalogue for pricing and specs, knowledge base for policies, guides, and FAQs.
+</Tip>

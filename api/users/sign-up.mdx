@@ -1,0 +1,193 @@
+---
+title: "POST /api/userSignUp — register a new user account"
+sidebarTitle: "Sign Up"
+description: "Creates a new Voice Agent user account with the CUSTOM_STUDENT role and returns the full user profile on success."
+---
+
+The `userSignUp` endpoint allows new users to self-register in Voice Agent. Provide a full name, email address, password, and mobile number; the server will create the account, assign the `CUSTOM_STUDENT` role automatically, and return the newly created user profile. If an account with the same email already exists (active or soft-deleted), the request will be rejected — each email address must be unique across all non-deleted accounts.
+
+```
+POST /api/userSignUp
+```
+
+## Authentication
+
+<Note>
+  This is a **public endpoint** — no `Authorization` header is required. It is intended for new users who do not yet have credentials.
+</Note>
+
+## Request Body
+
+<ParamField body="data" type="object" required>
+  The `DataRequest` wrapper object.
+
+  <Expandable title="data fields">
+    <ParamField body="fullName" type="string" required>
+      The user's display name (e.g. `"Alice Smith"`). Stored as `full_name` in the database.
+    </ParamField>
+
+    <ParamField body="emailId" type="string" required>
+      A valid, unique email address for the new account. Used as the login identifier and must not already exist among active users.
+    </ParamField>
+
+    <ParamField body="password" type="string" required>
+      The user's chosen password, stored as provided. Minimum complexity requirements are not enforced at the API layer.
+    </ParamField>
+
+    <ParamField body="mobileNumber" type="string" required>
+      The user's mobile/phone number (e.g. `"+14155550100"`). Stored for contact and notification purposes.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "User created successfully"
+  },
+  "data": {
+    "id": 42,
+    "roleId": 3,
+    "fullName": "Alice Smith",
+    "emailId": "alice@example.com",
+    "mobileNumber": "+14155550100",
+    "isDeleted": 0,
+    "isActive": 1,
+    "createdOn": "2024-01-15T10:30:00.123456",
+    "createdBy": null,
+    "updatedOn": null,
+    "updatedBy": null,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+<ResponseField name="dataResponse" type="object">
+  Top-level metadata about the result.
+
+  <Expandable title="dataResponse fields">
+    <ResponseField name="returnCode" type="integer">
+      `0` on success. See [Error Codes](#error-codes) for failure values.
+    </ResponseField>
+
+    <ResponseField name="responseDateTime" type="string (ISO 8601)">
+      Server timestamp of when the response was generated.
+    </ResponseField>
+
+    <ResponseField name="description" type="string">
+      Human-readable outcome message, e.g. `"User created successfully"`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The `UserMasterResponse` object for the newly created account.
+
+  <Expandable title="data fields">
+    <ResponseField name="id" type="integer">
+      Auto-generated primary key for the new user record.
+    </ResponseField>
+
+    <ResponseField name="roleId" type="integer">
+      The numeric ID of the role assigned to this user. New sign-ups are automatically assigned the `CUSTOM_STUDENT` role.
+    </ResponseField>
+
+    <ResponseField name="fullName" type="string">
+      The user's display name as provided in the request.
+    </ResponseField>
+
+    <ResponseField name="emailId" type="string">
+      The email address of the new account.
+    </ResponseField>
+
+    <ResponseField name="mobileNumber" type="string">
+      The mobile number provided during sign-up.
+    </ResponseField>
+
+    <ResponseField name="isDeleted" type="integer">
+      Soft-delete flag. Always `0` for a freshly created account.
+    </ResponseField>
+
+    <ResponseField name="isActive" type="integer">
+      Account active flag. `1` indicates the account is active.
+    </ResponseField>
+
+    <ResponseField name="createdOn" type="string (ISO 8601)">
+      Timestamp when the account was created.
+    </ResponseField>
+
+    <ResponseField name="createdBy" type="integer | null">
+      ID of the user who created this account. `null` for self-registration.
+    </ResponseField>
+
+    <ResponseField name="updatedOn" type="string | null">
+      Timestamp of the last update. `null` for a new account.
+    </ResponseField>
+
+    <ResponseField name="updatedBy" type="integer | null">
+      ID of the user who last updated this record. `null` for a new account.
+    </ResponseField>
+
+    <ResponseField name="deletedOn" type="string | null">
+      Timestamp of deletion. `null` for an active account.
+    </ResponseField>
+
+    <ResponseField name="deletedBy" type="integer | null">
+      ID of the user who deleted this record. `null` for an active account.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST https://your-api-host/api/userSignUp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "fullName": "Alice Smith",
+      "emailId": "alice@example.com",
+      "password": "s3cr3tP@ss",
+      "mobileNumber": "+14155550100"
+    }
+  }'
+```
+
+**Successful response:**
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00.123456",
+    "description": "User created successfully"
+  },
+  "data": {
+    "id": 42,
+    "roleId": 3,
+    "fullName": "Alice Smith",
+    "emailId": "alice@example.com",
+    "mobileNumber": "+14155550100",
+    "isDeleted": 0,
+    "isActive": 1,
+    "createdOn": "2024-01-15T10:30:00.123456",
+    "createdBy": null,
+    "updatedOn": null,
+    "updatedBy": null,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+## Error Codes
+
+| `returnCode` | Name          | Description                                                                               |
+|--------------|---------------|-------------------------------------------------------------------------------------------|
+| `0`          | `SUCCESS`     | Account created; full user profile returned in `data`.                                    |
+| `16`         | `BAD_REQUEST` | Request body was malformed, a required field was missing, or the email already exists.    |

@@ -1,0 +1,69 @@
+---
+title: "Voice Agent: FastAPI Backend for AI Voice & Chat"
+sidebarTitle: "Introduction"
+description: "Voice Agent is a FastAPI backend that powers outbound voice calls via Bolna.ai, streaming LLM chat with Gemini 2.5 Flash, semantic document search with pgvector, and RBAC user management."
+---
+
+Voice Agent is a production-ready FastAPI application that brings together four distinct AI-powered capabilities under a single async Python backend: outbound telephony through Bolna.ai, server-sent streaming chat responses from Google Gemini 2.5 Flash (routed via LiteLLM), retrieval-augmented generation (RAG) using pgvector cosine-similarity search, and a full role-based access control (RBAC) system for managing users, roles, and menu permissions. All data is persisted in PostgreSQL, database migrations are handled by Alembic, and the entire HTTP layer is built on FastAPI with SQLAlchemy 2 async sessions.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install dependencies, configure your environment, and have the server running in under five minutes.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Full reference for every environment variable Voice Agent reads at startup.
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+    Understand how routers, services, models, and middleware fit together.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/concepts/authentication">
+    Learn how JWT tokens are issued, validated, and refreshed across protected routes.
+  </Card>
+</CardGroup>
+
+## Key capabilities
+
+Voice Agent exposes four core feature areas, each backed by its own router and service layer.
+
+<CardGroup cols={2}>
+  <Card title="Outbound Voice Calls" icon="phone">
+    Trigger AI-driven outbound calls to any phone number by passing a Bolna agent ID and recipient number to the `/api/bolna` endpoints. The Bolna.ai platform handles telephony, TTS, and call lifecycle.
+  </Card>
+  <Card title="Streaming AI Chat" icon="messages">
+    Send a prompt to `/api/llm` or `/api/ai-chats` and receive a real-time token stream powered by `gemini/gemini-2.5-flash` via LiteLLM. Seven modular prompt templates (persona, security, harm avoidance, and more) are composed into the system instruction on every call.
+  </Card>
+  <Card title="RAG Document Search" icon="magnifying-glass">
+    Upload documents through the `/api/docs` endpoints. Their text is embedded and stored in the `document_master` table with a `pgvector` column. Queries perform cosine-similarity search across documents, chat attachments, and conversation history, then rerank results before passing them to the LLM as context.
+  </Card>
+  <Card title="RBAC User Management" icon="users">
+    Create users, assign roles, and control access to every menu item through the `/api` user and role endpoints. Tokens are JWT-based, and an `AuthMiddleware` layer enforces authentication on all protected routes before requests reach any router.
+  </Card>
+</CardGroup>
+
+## Tech stack
+
+Voice Agent is built entirely on Python async primitives and integrates the following libraries and services:
+
+- **Python 3.10+** — minimum required runtime
+- **FastAPI 0.124** — async HTTP framework with automatic OpenAPI generation
+- **SQLAlchemy 2 + asyncpg** — async ORM sessions and connection pooling for PostgreSQL
+- **PostgreSQL 15+ with pgvector** — relational storage and vector similarity search
+- **Alembic** — schema migrations managed via `Makefile` targets (`make migrate`, `make upgrade`)
+- **LiteLLM 1.83** — unified async LLM gateway; routes requests to `gemini/gemini-2.5-flash`
+- **Google Generative AI / google-genai** — embedding generation for semantic search
+- **Bolna.ai** — outbound telephony API called over HTTPS from `BolnaService`
+- **python-jose + passlib** — JWT creation, signing, and password hashing
+- **uvicorn** — ASGI server started via `startup.py` on port `8081`
+
+## Project layout
+
+All application code lives inside the `app/` directory, which is structured as follows:
+
+- **`app/main.py`** — creates the `FastAPI` instance, registers all routers under `/api`, attaches `AuthMiddleware` and `CORSMiddleware`, and mounts the `/static` directory.
+- **`app/routers/`** — one file per feature area: `user_master`, `role_master`, `menu_hierarchy`, `config_group`, `config_param`, `llm_router`, `document_extraction`, `ai_chats`, `bolna_router`, `product_router`, and `product_record_router`.
+- **`app/services/`** — business logic decoupled from HTTP concerns: `llm_service` (LiteLLM calls + RAG retrieval), `bolna_service` (outbound call trigger + knowledge-base search), `embedding_service` (vector generation), `user_service`, `role_service`, and more.
+- **`app/models/`** — SQLAlchemy ORM models for every database table including `user_master`, `role_master`, `document_master`, `chat_sessions`, `chat_attachments`, `product`, and others.
+- **`app/schemas/`** — Pydantic v2 request/response schemas used for validation and serialization in each router.
+- **`app/core/`** — cross-cutting concerns: `config.py` (environment variable loading via `Settings`), `security.py` (password hashing and JWT), and `logger.py`.
+- **`app/middleware/`** — `auth.py` implements `AuthMiddleware`, which validates the `Authorization: Bearer <token>` header before each protected request reaches a router.
+- **`app/prompt_templates/`** — plain-text files (`persona.txt`, `query_deconstruction.txt`, `security_injection.txt`, `identity_confidentiality.txt`, `response_quality.txt`, `harm_avoidance.txt`, `uncertainity_management.txt`) concatenated at runtime into the LLM system instruction.

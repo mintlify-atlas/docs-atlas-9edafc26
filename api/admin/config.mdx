@@ -1,0 +1,748 @@
+---
+title: "Configuration group and parameter management API"
+sidebarTitle: "Config"
+description: "Manage runtime configuration via a two-level key-value store — group config parameters into named groups and read or update values without redeployment."
+---
+
+Voice Agent includes a runtime configuration system that lets administrators manage application settings directly in the database without redeployment. Configuration is organised in two tiers: a **Config Group** acts as a named namespace (e.g. `"LLM Settings"`, `"Voice Pipeline"`), and each group contains one or more **Config Parameters** — individual key-value entries identified by a `name` and a stable `paramUniqueId`. Both tiers support soft-deletion and maintain full audit trails with `createdBy`/`updatedBy` fields. All endpoints require a valid Bearer token and use `POST` with the `DataRequest` envelope.
+
+<Note>
+  All request bodies must be wrapped in `{"data": {...}}`. All responses follow the standard `APIResponse` envelope. Pagination on list endpoints is controlled by `skip` and `limit` query parameters.
+</Note>
+
+## Response envelope
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "..."
+  },
+  "data": { ... }
+}
+```
+
+| `returnCode` | Meaning       |
+|-------------|---------------|
+| `0`         | SUCCESS       |
+| `2`         | NO_DATA_FOUND |
+| `10`        | NOT_FOUND     |
+| `16`        | BAD_REQUEST   |
+
+---
+
+## Data model
+
+```
+config_group
+    │
+    ├─ id (PK)
+    ├─ name          (unique)
+    ├─ description
+    ├─ groupUniqueId (auto-generated: GROUP_<NAME_UPPERCASED>)
+    │
+    └─── config_param (one-to-many via config_group_id)
+             │
+             ├─ id (PK)
+             ├─ name          (unique)
+             ├─ description
+             ├─ configGroupId (FK → config_group.id)
+             └─ paramUniqueId (auto-generated: <GROUP_NAME>_<PARAM_NAME>)
+```
+
+A `ConfigGroup` is a logical container — think of it as a configuration namespace. Each `ConfigParam` inside it is an individual setting entry. The `paramUniqueId` embeds the parent group name, making it self-documenting (e.g. `LLM_SETTINGS_MODEL_NAME`). Both unique IDs are generated automatically at creation time and cannot be set by the caller.
+
+<Tip>
+  Use `groupUniqueId` and `paramUniqueId` as stable identifiers in your application code. Because they are derived from names, changing a name via the edit endpoint does **not** update the unique ID — store the ID returned at creation time.
+</Tip>
+
+---
+
+## Config Group object
+
+<ResponseField name="id" type="integer" required>
+  Auto-incremented primary key of the config group.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Unique display name for this configuration group.
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Short description of what this group of parameters controls.
+</ResponseField>
+
+<ResponseField name="groupUniqueId" type="string" required>
+  Machine-generated stable identifier. Format: `GROUP_<NAME_UPPERCASED>`. Generated at creation; read-only after that.
+</ResponseField>
+
+<ResponseField name="isDeleted" type="integer" required>
+  Soft-delete flag. `1` means the group has been deleted and is excluded from all queries.
+</ResponseField>
+
+<ResponseField name="createdOn" type="string (datetime)" required>
+  ISO 8601 timestamp of record creation.
+</ResponseField>
+
+<ResponseField name="createdBy" type="integer | null">
+  ID of the user who created the group.
+</ResponseField>
+
+<ResponseField name="updatedOn" type="string (datetime)" required>
+  ISO 8601 timestamp of the last update.
+</ResponseField>
+
+<ResponseField name="updatedBy" type="integer | null">
+  ID of the user who last updated the group.
+</ResponseField>
+
+<ResponseField name="deletedOn" type="string (datetime) | null">
+  Timestamp of soft-deletion. `null` while active.
+</ResponseField>
+
+<ResponseField name="deletedBy" type="integer | null">
+  ID of the user who soft-deleted the group. `null` while active.
+</ResponseField>
+
+---
+
+## Config Param object
+
+<ResponseField name="id" type="integer" required>
+  Auto-incremented primary key of the config parameter.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Unique name for this parameter (unique across all non-deleted parameters).
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Short description of what this parameter controls.
+</ResponseField>
+
+<ResponseField name="configGroupId" type="integer" required>
+  Foreign key referencing the parent `config_group.id`. The referenced group must exist and must not be soft-deleted.
+</ResponseField>
+
+<ResponseField name="paramUniqueId" type="string" required>
+  Machine-generated identifier. Format: `<GROUP_NAME_UPPERCASED>_<PARAM_NAME_UPPERCASED>`. Generated at creation by looking up the parent group's name.
+</ResponseField>
+
+<ResponseField name="isDeleted" type="integer" required>
+  Soft-delete flag.
+</ResponseField>
+
+<ResponseField name="createdOn" type="string (datetime)" required>
+  ISO 8601 timestamp of record creation.
+</ResponseField>
+
+<ResponseField name="createdBy" type="integer | null">
+  ID of the user who created the parameter.
+</ResponseField>
+
+<ResponseField name="updatedOn" type="string (datetime)" required>
+  ISO 8601 timestamp of the last update.
+</ResponseField>
+
+<ResponseField name="updatedBy" type="integer | null">
+  ID of the user who last updated the parameter.
+</ResponseField>
+
+<ResponseField name="deletedOn" type="string (datetime) | null">
+  Timestamp of soft-deletion. `null` while active.
+</ResponseField>
+
+<ResponseField name="deletedBy" type="integer | null">
+  ID of the user who soft-deleted the parameter. `null` while active.
+</ResponseField>
+
+---
+
+## Config Group endpoints
+
+### Add or edit a config group
+
+Creates a new config group (`id: 0`) or updates an existing one (pass the numeric `id`). On creation, `groupUniqueId` is automatically generated as `GROUP_<NAME_UPPERCASED>` and cannot be overridden.
+
+```
+POST /addEditConfigGroup
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="id" type="integer" default="0">
+  Pass `0` to create a new config group. Pass the existing integer primary key to update it.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Unique name for the config group. Returns `400 Bad Request` if a non-deleted group with this name already exists.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Description of what this group of parameters configures.
+</ParamField>
+
+<ParamField body="groupUniqueId" type="string">
+  Optional. Ignored on create (auto-generated). May be supplied on update but the service does not persist changes to this field — `groupUniqueId` is set once at creation.
+</ParamField>
+
+<ParamField body="isDeleted" type="integer" default="0">
+  Soft-delete flag. Defaults to `0`.
+</ParamField>
+
+#### Response
+
+Returns `APIResponse` with `data` as the created or updated `ConfigGroup` object. Both create and update return `returnCode: 0` (SUCCESS).
+
+#### Examples
+
+**Create a new config group**
+
+```bash
+curl -X POST https://api.example.com/addEditConfigGroup \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 0,
+      "name": "LLM Settings",
+      "description": "Parameters for the language model"
+    }
+  }'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "Config group created successfully."
+  },
+  "data": {
+    "id": 3,
+    "name": "LLM Settings",
+    "description": "Parameters for the language model",
+    "groupUniqueId": "GROUP_LLM_SETTINGS",
+    "isDeleted": 0,
+    "createdOn": "2024-01-15T10:30:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T10:30:00",
+    "updatedBy": 1,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+**Update an existing config group**
+
+```bash
+curl -X POST https://api.example.com/addEditConfigGroup \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 3,
+      "name": "LLM Settings",
+      "description": "Language model inference parameters"
+    }
+  }'
+```
+
+---
+
+### Get all config groups
+
+Returns all non-deleted config groups. Supports optional `skip` and `limit` query parameters for pagination (defaults: `skip=0`, `limit=100`).
+
+```
+POST /getAllConfigGroup
+```
+
+**Authentication:** Bearer token required.
+
+#### Query parameters
+
+<ParamField query="skip" type="integer" default="0">
+  Number of records to skip (offset-based pagination).
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum number of records to return per page.
+</ParamField>
+
+#### Request body
+
+No body required. Send an empty `POST` or omit the body entirely.
+
+#### Response
+
+Returns `data` as an array of `ConfigGroup` objects. When no groups exist, `returnCode` is `2` (NO_DATA_FOUND) and `data` is `[]`.
+
+#### Example
+
+```bash
+curl -X POST "https://api.example.com/getAllConfigGroup?skip=0&limit=50" \
+  -H "Authorization: Bearer <token>"
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:31:00",
+    "description": "Config groups retrieved successfully."
+  },
+  "data": [
+    {
+      "id": 1,
+      "name": "Voice Pipeline",
+      "description": "ASR and TTS settings",
+      "groupUniqueId": "GROUP_VOICE_PIPELINE",
+      "isDeleted": 0,
+      "createdOn": "2024-01-01T00:00:00",
+      "createdBy": 1,
+      "updatedOn": "2024-01-01T00:00:00",
+      "updatedBy": 1,
+      "deletedOn": null,
+      "deletedBy": null
+    },
+    {
+      "id": 3,
+      "name": "LLM Settings",
+      "description": "Language model inference parameters",
+      "groupUniqueId": "GROUP_LLM_SETTINGS",
+      "isDeleted": 0,
+      "createdOn": "2024-01-15T10:30:00",
+      "createdBy": 1,
+      "updatedOn": "2024-01-15T10:30:00",
+      "updatedBy": 1,
+      "deletedOn": null,
+      "deletedBy": null
+    }
+  ]
+}
+```
+
+---
+
+### Get a specific config group
+
+Fetches a single config group by its numeric primary key.
+
+```
+POST /getSpecificConfigGroup
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="id" type="integer" required>
+  Primary key of the config group to retrieve. Returns `returnCode: 2` (NO_DATA_FOUND) if the ID does not exist or the group is soft-deleted.
+</ParamField>
+
+#### Response
+
+Returns `data` as a single `ConfigGroup` object.
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/getSpecificConfigGroup \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 3
+    }
+  }'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:32:00",
+    "description": "Config group with ID 3 retrieved successfully."
+  },
+  "data": {
+    "id": 3,
+    "name": "LLM Settings",
+    "description": "Language model inference parameters",
+    "groupUniqueId": "GROUP_LLM_SETTINGS",
+    "isDeleted": 0,
+    "createdOn": "2024-01-15T10:30:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T10:30:00",
+    "updatedBy": 1,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+---
+
+### Delete a config group
+
+Soft-deletes a config group by its numeric primary key. The `data` field of the request envelope accepts an integer directly (not a nested object).
+
+```
+POST /deleteConfigGroup
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="data" type="integer" required>
+  The integer primary key of the config group to delete. Unlike other endpoints, the `data` value is a bare integer, not an object: `{"data": 3}`.
+</ParamField>
+
+#### Response
+
+Returns `APIResponse` with `returnCode: 0` and `data` as the soft-deleted `ConfigGroup` object. Returns `404 Not Found` if the group does not exist.
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/deleteConfigGroup \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"data": 3}'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T11:00:00",
+    "description": "Config group with ID 3 marked as deleted successfully."
+  },
+  "data": {
+    "id": 3,
+    "name": "LLM Settings",
+    "description": "Language model inference parameters",
+    "groupUniqueId": "GROUP_LLM_SETTINGS",
+    "isDeleted": 1,
+    "createdOn": "2024-01-15T10:30:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T11:00:00",
+    "updatedBy": 1,
+    "deletedOn": "2024-01-15T11:00:00",
+    "deletedBy": 1
+  }
+}
+```
+
+<Warning>
+  Deleting a config group does **not** cascade to its child `ConfigParam` records. Any parameters belonging to the deleted group will become orphaned. Delete or reassign child parameters before deleting the group.
+</Warning>
+
+---
+
+## Config Param endpoints
+
+### Add or edit a config param
+
+Creates a new config parameter (`id: 0`) or updates an existing one. On creation, `paramUniqueId` is auto-generated by combining the parent group's name with the parameter name: `<GROUP_NAME>_<PARAM_NAME>` (both uppercased, spaces replaced with `_`).
+
+```
+POST /addEditConfigParam
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="id" type="integer" default="0">
+  Pass `0` to create a new parameter. Pass the existing integer primary key to update it.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Unique name for this parameter. Returns an error if a non-deleted parameter with this name already exists.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Short description of what this parameter controls.
+</ParamField>
+
+<ParamField body="configGroupId" type="integer" required>
+  Primary key of the parent config group. The group must exist and must not be soft-deleted, as `paramUniqueId` generation requires reading the group's name.
+</ParamField>
+
+<ParamField body="paramUniqueId" type="string">
+  Optional on create (auto-generated). On update, if provided, the service will persist this value — use with care since `paramUniqueId` is intended to be a stable identifier.
+</ParamField>
+
+<ParamField body="isDeleted" type="integer" default="0">
+  Soft-delete flag. Defaults to `0`.
+</ParamField>
+
+#### Response
+
+Returns `APIResponse` with `data` as the created or updated `ConfigParam` object. Both create and update return `returnCode: 0` (SUCCESS).
+
+#### Examples
+
+**Create a new config parameter**
+
+```bash
+curl -X POST https://api.example.com/addEditConfigParam \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 0,
+      "name": "Model Name",
+      "description": "LLM model identifier to use for inference",
+      "configGroupId": 3
+    }
+  }'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:35:00",
+    "description": "Config param created successfully."
+  },
+  "data": {
+    "id": 7,
+    "name": "Model Name",
+    "description": "LLM model identifier to use for inference",
+    "configGroupId": 3,
+    "paramUniqueId": "LLM_SETTINGS_MODEL_NAME",
+    "isDeleted": 0,
+    "createdOn": "2024-01-15T10:35:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T10:35:00",
+    "updatedBy": 1,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+**Update an existing config parameter**
+
+```bash
+curl -X POST https://api.example.com/addEditConfigParam \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 7,
+      "name": "Model Name",
+      "description": "Primary LLM model identifier",
+      "configGroupId": 3
+    }
+  }'
+```
+
+---
+
+### Get all config params
+
+Returns all non-deleted config parameters across all groups. Supports `skip` and `limit` query parameters for pagination.
+
+```
+POST /getAllConfigParam
+```
+
+**Authentication:** Bearer token required.
+
+#### Query parameters
+
+<ParamField query="skip" type="integer" default="0">
+  Number of records to skip.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum records to return.
+</ParamField>
+
+#### Request body
+
+No body required.
+
+#### Response
+
+Returns `data` as an array of `ConfigParam` objects. When no parameters exist, `returnCode` is `2` (NO_DATA_FOUND) and `data` is `[]`.
+
+#### Example
+
+```bash
+curl -X POST "https://api.example.com/getAllConfigParam?skip=0&limit=100" \
+  -H "Authorization: Bearer <token>"
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:36:00",
+    "description": "Config params retrieved successfully."
+  },
+  "data": [
+    {
+      "id": 1,
+      "name": "Sample Rate",
+      "description": "Audio sample rate in Hz",
+      "configGroupId": 1,
+      "paramUniqueId": "VOICE_PIPELINE_SAMPLE_RATE",
+      "isDeleted": 0,
+      "createdOn": "2024-01-01T00:00:00",
+      "createdBy": 1,
+      "updatedOn": "2024-01-01T00:00:00",
+      "updatedBy": 1,
+      "deletedOn": null,
+      "deletedBy": null
+    },
+    {
+      "id": 7,
+      "name": "Model Name",
+      "description": "Primary LLM model identifier",
+      "configGroupId": 3,
+      "paramUniqueId": "LLM_SETTINGS_MODEL_NAME",
+      "isDeleted": 0,
+      "createdOn": "2024-01-15T10:35:00",
+      "createdBy": 1,
+      "updatedOn": "2024-01-15T10:35:00",
+      "updatedBy": 1,
+      "deletedOn": null,
+      "deletedBy": null
+    }
+  ]
+}
+```
+
+---
+
+### Get a specific config param
+
+Fetches a single config parameter by its numeric primary key. The request `data` field is a bare integer.
+
+```
+POST /getSpecificConfigParam
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="data" type="integer" required>
+  The integer primary key of the config parameter to retrieve. Pass as a bare integer in the envelope: `{"data": 7}`.
+</ParamField>
+
+#### Response
+
+Returns `data` as a single `ConfigParam` object. Returns `returnCode: 2` (NO_DATA_FOUND) if the ID does not exist or is soft-deleted.
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/getSpecificConfigParam \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"data": 7}'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:37:00",
+    "description": "Config param with ID 7 retrieved successfully."
+  },
+  "data": {
+    "id": 7,
+    "name": "Model Name",
+    "description": "Primary LLM model identifier",
+    "configGroupId": 3,
+    "paramUniqueId": "LLM_SETTINGS_MODEL_NAME",
+    "isDeleted": 0,
+    "createdOn": "2024-01-15T10:35:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T10:35:00",
+    "updatedBy": 1,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+---
+
+### Delete a config param
+
+Soft-deletes a config parameter by its numeric primary key. The request `data` field is a bare integer.
+
+```
+POST /deleteConfigParam
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="data" type="integer" required>
+  The integer primary key of the config parameter to delete. Pass as a bare integer: `{"data": 7}`.
+</ParamField>
+
+#### Response
+
+Returns `APIResponse` with `returnCode: 0` and `data` as the soft-deleted `ConfigParam` object. Returns `404 Not Found` if the parameter does not exist or is already deleted.
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/deleteConfigParam \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"data": 7}'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T11:05:00",
+    "description": "Config param with ID 7 marked as deleted successfully."
+  },
+  "data": {
+    "id": 7,
+    "name": "Model Name",
+    "description": "Primary LLM model identifier",
+    "configGroupId": 3,
+    "paramUniqueId": "LLM_SETTINGS_MODEL_NAME",
+    "isDeleted": 1,
+    "createdOn": "2024-01-15T10:35:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T11:05:00",
+    "updatedBy": 1,
+    "deletedOn": "2024-01-15T11:05:00",
+    "deletedBy": 1
+  }
+}
+```
+
+---
+
+## Runtime configuration workflow
+
+The configuration system is designed for zero-downtime settings updates. The recommended pattern for using it in application code:
+
+1. **At startup** — load all required parameters by calling `getAllConfigParam` and index them by `paramUniqueId`.
+2. **At runtime** — call `getSpecificConfigParam` to fetch the latest value of a setting on-demand, bypassing any in-process cache.
+3. **To change a setting** — call `addEditConfigParam` with the parameter's `id` and the updated `description` field (or extend the schema with a `value` column in your deployment). No restart required.
+4. **To retire a setting** — call `deleteConfigParam` to soft-delete it. The application code should gracefully fall back to a default if a parameter returns NO_DATA_FOUND.
+
+<Note>
+  The current schema stores configuration metadata (`name`, `description`, `paramUniqueId`) but not a freeform `value` column. In practice, the `description` field or an application-layer extension stores the actual runtime value associated with each parameter key.
+</Note>

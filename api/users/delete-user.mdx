@@ -1,0 +1,129 @@
+---
+title: "POST /api/deleteUser — soft-delete a user account"
+sidebarTitle: "Delete User"
+description: "Soft-deletes a user account by setting is_deleted=1 and recording the deleting user's ID and the deletion timestamp. The record is retained in the database."
+---
+
+The `deleteUser` endpoint performs a **soft delete** — it does not permanently remove the user record from the database. Instead, the target user's `is_deleted` flag is set to `1`, and the fields `deleted_by` (set to the caller's user ID) and `deleted_on` (set to the current UTC timestamp) are recorded for auditing purposes. Soft-deleted users will no longer appear in `getAllUsers` results and cannot log in. The operation requires a valid bearer token and will reject callers whose token cannot be validated.
+
+```
+POST /api/deleteUser
+```
+
+## Authentication
+
+<Note>
+  **Authentication required.** Include a valid JWT in the `Authorization` header:
+  ```
+  Authorization: Bearer <authToken>
+  ```
+  The ID of the authenticated caller is automatically recorded in `deleted_by` on the target user's record.
+</Note>
+
+## Request Body
+
+<ParamField body="data" type="object" required>
+  The `DataRequest` wrapper object.
+
+  <Expandable title="data fields">
+    <ParamField body="id" type="integer" required>
+      The primary key of the user to soft-delete. Must be a positive integer referencing an active (`is_deleted = 0`) user record.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+On success, the `data` field is `null` — the response is confirmation only. Inspect `returnCode` to determine the outcome.
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "User deleted successfully"
+  },
+  "data": null
+}
+```
+
+<ResponseField name="dataResponse" type="object">
+  Top-level metadata about the result.
+
+  <Expandable title="dataResponse fields">
+    <ResponseField name="returnCode" type="integer">
+      `0` on success. See [Error Codes](#error-codes) for failure values.
+    </ResponseField>
+
+    <ResponseField name="responseDateTime" type="string (ISO 8601)">
+      Server timestamp of when the response was generated.
+    </ResponseField>
+
+    <ResponseField name="description" type="string">
+      Human-readable outcome. `"User deleted successfully"` on success, or an explanation of the failure.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="data" type="null">
+  Always `null` for this endpoint. The soft-delete confirmation is communicated entirely through `returnCode` and `description`.
+</ResponseField>
+
+## What Happens on the Record
+
+When a soft-delete succeeds, the following changes are written to the `user_master` table row:
+
+| Column       | New value                              |
+|--------------|----------------------------------------|
+| `is_deleted` | `1`                                    |
+| `deleted_by` | `id` of the authenticated caller       |
+| `deleted_on` | Current UTC timestamp                  |
+
+No other fields are modified. The record remains in the database and can be recovered by an operator directly via the database if needed.
+
+## Example
+
+```bash
+curl -X POST https://your-api-host/api/deleteUser \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <authToken>" \
+  -d '{
+    "data": {
+      "id": 42
+    }
+  }'
+```
+
+**Successful response:**
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00.123456",
+    "description": "User deleted successfully"
+  },
+  "data": null
+}
+```
+
+**User not found (already deleted or never existed):**
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 10,
+    "responseDateTime": "2024-01-15T10:30:00.123456",
+    "description": "User not found or already deleted"
+  },
+  "data": null
+}
+```
+
+## Error Codes
+
+| `returnCode` | Name           | Description                                                                                    |
+|--------------|----------------|------------------------------------------------------------------------------------------------|
+| `0`          | `SUCCESS`      | User was soft-deleted successfully.                                                            |
+| `4`          | `UNAUTHORIZED` | The bearer token was absent, expired, or invalid. Returned as an HTTP `401` response.          |
+| `10`         | `NOT_FOUND`    | No active user with the given ID exists — the user was already deleted or the ID is invalid.   |

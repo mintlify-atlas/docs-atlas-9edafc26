@@ -1,0 +1,189 @@
+---
+title: "Voice Agent architecture and system design"
+sidebarTitle: "Architecture"
+description: "A layered overview of Voice Agent's FastAPI backend: HTTP routing, JWT middleware, service layer, SQLAlchemy ORM models, and PostgreSQL with pgvector."
+---
+
+Voice Agent is a FastAPI backend organized into four clear horizontal layers — routing, middleware, services, and data models — each with a single responsibility. HTTP requests arrive at FastAPI routers that delegate all business logic to service modules; an authentication middleware enforces JWT validation before any router sees the request; SQLAlchemy ORM models map to a PostgreSQL database extended with the `pgvector` extension for semantic search; and a set of external integrations handles voice calls (Bolna.ai), LLM inference (Gemini 2.5 Flash via LiteLLM), and transactional email (SMTP).
+
+## Component overview
+
+The application is split into five layers that communicate top-to-bottom:
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| **HTTP API** | FastAPI routers (`app/routers/`) | Receive and validate HTTP requests, call service functions, return responses |
+| **Middleware** | `AuthMiddleware` (`app/middleware/auth.py`) | Validate JWT Bearer tokens before any router handler runs |
+| **Services** | Python modules in `app/services/` | Embed text, execute RAG search, call the LLM, manage chat sessions, interact with Bolna.ai |
+| **Models** | SQLAlchemy ORM (`app/models/`) | Define database table schemas; `pgvector` `Vector(3072)` columns hold embeddings |
+| **Database** | PostgreSQL + `pgvector` | Persist users, roles, sessions, chats, documents, and AI usage metrics |
+
+Static files (e.g., uploaded documents) are served from the `/static` mount backed by the local filesystem.
+
+### Registered routers
+
+`app/main.py` mounts each feature area under the `/api` prefix:
+
+```python
+app.include_router(user_master.router,        prefix="/api", tags=["Users"])
+app.include_router(role_master.router,         prefix="/api", tags=["Roles"])
+app.include_router(menu_hierarchy.router,      prefix="/api", tags=["Menu Hierarchy"])
+app.include_router(config_group.router,        prefix="/api", tags=["Config Groups"])
+app.include_router(config_param.router,        prefix="/api", tags=["Config Params"])
+app.include_router(llm_router.router,          prefix="/api", tags=["LLM"])
+app.include_router(document_extraction.router, prefix="/api", tags=["Docs"])
+app.include_router(ai_chats.router,            prefix="/api", tags=["AIChat"])
+app.include_router(bolna_router.router,        prefix="/api", tags=["Bolna"])
+app.include_router(product_router.router,      prefix="/api", tags=["Products"])
+app.include_router(product_record_router.router, prefix="/api", tags=["Product Records"])
+```
+
+## Request lifecycle
+
+The following steps trace a `POST /api/chatConversation` request from arrival to the streaming SSE response sent back to the client.
+
+<Steps>
+  <Step title="Receive request">
+    FastAPI accepts a multipart form containing `userQuery` (string), `sessionId` (optional int), and an optional `file` upload.
+  </Step>
+  <Step title="Auth middleware validates JWT">
+    `AuthMiddleware` intercepts the request. It reads the `Authorization: Bearer <token>` header, decodes the JWT with `decode_authToken()`, and attaches the decoded payload to `request.state.user`. Any request without a valid token receives HTTP 401 before reaching the router.
+  </Step>
+  <Step title="Router resolves the authenticated user">
+    `get_current_user()` resolves the `UserMaster` record from the database using the identity in `request.state.user`. The router then checks whether the user has exceeded their lifetime token budget stored in `ai_usage_master`.
+  </Step>
+  <Step title="Session management">
+    If `sessionId` is provided, the existing `ChatSessions` record is loaded and validated. If omitted, a new session is created with an auto-generated name derived from the user's query.
+  </Step>
+  <Step title="File extraction (optional)">
+    When a file is attached, `process_and_save_document()` extracts raw text and generates an embedding for the attachment. The result is stored in `chat_attachments` linked to the user message.
+  </Step>
+  <Step title="Store user message">
+    The user's query text is embedded by `embedding_service` and persisted in the `chats` table with `role = 1`.
+  </Step>
+  <Step title="Query resolution">
+    `resolve_query_with_history()` fetches the last four chat turns and, if the new message is a follow-up, rewrites it as a fully self-contained question using Gemini 2.5 Flash before RAG search begins.
+  </Step>
+  <Step title="Hybrid RAG search">
+    `search_documents()` generates a query embedding then runs three parallel pgvector cosine-distance queries across `document_master`, `chat_attachments`, and `chats`. Results are merged and globally re-ranked by distance; the top 10 are forwarded to the LLM.
+  </Step>
+  <Step title="LLM call (streaming)">
+    `llm_call()` concatenates the seven prompt-template files into a system instruction block, then calls `gemini/gemini-2.5-flash` via LiteLLM with `stream=True`. Chunks are yielded as Server-Sent Events (`text/event-stream`).
+  </Step>
+  <Step title="Store AI message and token usage">
+    After the stream completes, the full AI response is embedded and written to `chats` with `role = 2`. Accumulated token counts (input, output, reasoning, total) and cost are written to `ai_usage_master`.
+  </Step>
+</Steps>
+
+## Database schema
+
+The following tables make up the core schema:
+
+### `user_master`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` PK | Auto-increment user identifier |
+| `role_id` | `BigInteger` | Foreign key to `role_master.id` |
+| `full_name` | `String(255)` | Display name |
+| `email_id` | `String(100)` | Unique login e-mail |
+| `mobile_number` | `String(10)` | Unique mobile number |
+| `password` | `String(255)` | bcrypt-hashed password |
+| `token_limit` | `BigInteger` | Lifetime token budget (default **1,000,000**) |
+| `is_active` | `Integer` | `1` = active, `0` = disabled |
+| `is_deleted` | `Integer` | Soft-delete flag |
+
+### `role_master`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` PK | Auto-increment role identifier |
+| `role_unique_id` | `String(255)` | Stable string identifier for the role |
+| `name` | `String(100)` | Human-readable role name (unique) |
+| `is_restricted` | `Integer` | `1` = restricted access, `0` = unrestricted |
+
+### `chat_sessions`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` PK | Session identifier (returned as `X-Session-ID` header) |
+| `user_id` | `BigInteger` FK | Owner user |
+| `session_name` | `String(255)` | Auto-generated or manually renamed session title |
+| `raw_context` | `Text` | Optional raw context attached to the session |
+
+### `chats`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` PK | Individual message identifier |
+| `user_id` | `Integer` FK | Owning user |
+| `session_id` | `BigInteger` FK | Parent session |
+| `role` | `Integer` | `1` = user message, `2` = assistant message |
+| `message` | `Text` | Message content |
+| `embedding` | `Vector(3072)` | pgvector embedding for semantic search |
+
+### `chat_attachments`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` PK | Attachment identifier |
+| `chat_id` | `BigInteger` FK | Parent chat message |
+| `file_name` | `String(255)` | Original filename |
+| `file_path` | `String(500)` | Path under `/static/uploads/` |
+| `file_text` | `Text` | Extracted plain text |
+| `embedding` | `Vector(3072)` | pgvector embedding for semantic search |
+
+### `document_master`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` PK | Document identifier |
+| `file_name` | `Text` | Original filename |
+| `content` | `Text` | Full extracted text for RAG retrieval |
+| `embedding` | `Vector(3072)` | pgvector embedding |
+
+### `ai_usage_master`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` PK | Usage record identifier |
+| `user_id` / `session_id` / `chat_id` | `Integer` | Context references |
+| `input_tokens` | `Integer` | Prompt token count |
+| `output_tokens` | `Integer` | Completion token count |
+| `resasoning_tokens` | `Integer` | Reasoning token count (Gemini thinking budget) |
+| `total_tokens` | `Integer` | Sum of all token types |
+| `cost` | `DECIMAL(10,4)` | Computed cost in USD |
+| `total_time` | `DECIMAL(10,4)` | Wall-clock seconds for the full request |
+
+## Integrations
+
+Voice Agent connects to four external systems:
+
+**Bolna.ai (voice calls)**
+Outbound phone calls are triggered via `POST /api/bolna/trigger-call`. The Bolna agent can search the knowledge base in real time by calling the `POST /api/bolna/webhook/tool` endpoint registered as a Custom Tool in the Bolna Dashboard.
+
+**LiteLLM / Gemini 2.5 Flash (LLM)**
+All language model inference — chat completions and query resolution — goes through LiteLLM's `acompletion` interface targeting `gemini/gemini-2.5-flash`. LiteLLM provides unified token-usage reporting and cost calculation via `completion_cost()`.
+
+**pgvector (embeddings and semantic search)**
+The `pgvector` PostgreSQL extension stores 3072-dimensional vectors in `document_master`, `chats`, and `chat_attachments`. The cosine distance operator `<=>` powers all semantic retrieval queries.
+
+**SMTP (email)**
+Transactional email (session sharing) is dispatched through an SMTP integration in `user_chat_service.send_share_session_email()`.
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/concepts/authentication">
+    JWT flow, Auth middleware, and RBAC roles
+  </Card>
+  <Card title="RAG Pipeline" icon="database" href="/concepts/rag-pipeline">
+    Hybrid semantic search with pgvector
+  </Card>
+  <Card title="Prompt Templates" icon="file-lines" href="/concepts/prompt-templates">
+    System instruction design and template loading
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get Voice Agent running locally
+  </Card>
+</CardGroup>

@@ -1,0 +1,136 @@
+---
+title: "POST /api/upload_documents — ingest files into knowledge base"
+sidebarTitle: "Upload Documents"
+description: "Upload one or more files to extract text, generate vector embeddings, and persist them in the knowledge base for RAG-powered chat and voice agent search."
+---
+
+This endpoint accepts one or more files via a `multipart/form-data` request, extracts their text content, generates vector embeddings using the configured embedding model, and stores both the raw text and the embedding in the `document_master` table backed by pgvector. Once ingested, documents are immediately available for semantic search across all RAG pipelines — including the Bolna knowledge base webhook and chat conversations.
+
+## Endpoint
+
+```
+POST /api/upload_documents
+```
+
+## Authentication
+
+**Bearer token required.** Include a valid JWT in the `Authorization` header:
+
+```
+Authorization: Bearer <your-token>
+```
+
+Requests without a valid token are rejected with `401 Unauthorized`.
+
+## Content-Type
+
+```
+multipart/form-data
+```
+
+## Request Fields
+
+<ParamField body="files" type="file[]" required>
+  One or more files to upload. Each file must have one of the following extensions:
+
+  | Type     | Extensions                      |
+  |----------|---------------------------------|
+  | PDF      | `.pdf`                          |
+  | Excel    | `.xlsx`, `.xls`                 |
+  | CSV      | `.csv`                          |
+  | Word     | `.docx`, `.doc`                 |
+  | Image    | `.jpg`, `.jpeg`, `.png`         |
+
+  Files with any other extension are rejected with HTTP 400.
+</ParamField>
+
+<ParamField body="project_id" type="integer" optional>
+  Reserved for future project-scoped document storage. Currently unused — any value supplied is accepted but has no effect on processing or retrieval.
+</ParamField>
+
+## Processing Pipeline
+
+Once the files are received, the server runs the following steps for each upload request:
+
+1. **Save temporarily** — files are written to a unique temporary directory under `uploads/<request-id>/`.
+2. **Extract text** — text is extracted according to file type (PDF parsing, Excel/CSV reading, Word extraction, or OCR for images).
+3. **Generate embedding** — the combined extracted text is passed to the embedding service to produce a 3 072-dimension vector.
+4. **Persist to database** — a `DocumentMaster` record is created with `file_name`, `content` (raw text), and `embedding` (pgvector).
+5. **Clean up** — the temporary directory is deleted regardless of success or failure.
+
+## Response
+
+```json
+{
+  "status": "success",
+  "message": "Documents uploaded and embeddings saved",
+  "data": {
+    "id": 42,
+    "file_name": "report.pdf"
+  }
+}
+```
+
+<ResponseField name="status" type="string">
+  Always `"success"` on a successful response.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable confirmation that the documents were processed and saved.
+</ResponseField>
+
+<ResponseField name="data.id" type="integer">
+  The auto-incremented primary key of the newly created `document_master` record.
+</ResponseField>
+
+<ResponseField name="data.file_name" type="string">
+  The file name of the first uploaded file, stored as the record's identifier.
+</ResponseField>
+
+## Errors
+
+| HTTP Status | Cause |
+|---|---|
+| `400 Bad Request` | No files were supplied, a file has an unsupported extension, or no valid files remained after filtering. |
+| `401 Unauthorized` | Missing or invalid Bearer token. |
+| `500 Internal Server Error` | Text extraction, embedding generation, or database persistence failed. |
+
+## Example
+
+Upload a single PDF file:
+
+```bash
+curl -X POST https://your-server.com/api/upload_documents \
+  -H "Authorization: Bearer <your-token>" \
+  -F "files=@/path/to/report.pdf"
+```
+
+Upload multiple files in one request:
+
+```bash
+curl -X POST https://your-server.com/api/upload_documents \
+  -H "Authorization: Bearer <your-token>" \
+  -F "files=@/path/to/report.pdf" \
+  -F "files=@/path/to/product-list.xlsx"
+```
+
+**Example response:**
+
+```json
+{
+  "status": "success",
+  "message": "Documents uploaded and embeddings saved",
+  "data": {
+    "id": 42,
+    "file_name": "report.pdf"
+  }
+}
+```
+
+<Note>
+  Uploaded documents are automatically included in the RAG pipeline for all future chat conversations and knowledge base webhook queries. No additional configuration is required after a successful upload.
+</Note>
+
+<Warning>
+  When multiple files are uploaded in a single request, they are concatenated into one document record. The `file_name` stored in the database corresponds to the **first** file in the batch. Upload files individually if you need separate, independently searchable records.
+</Warning>

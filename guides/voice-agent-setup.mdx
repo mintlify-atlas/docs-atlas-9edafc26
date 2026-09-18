@@ -1,0 +1,122 @@
+---
+title: "Set up Bolna.ai voice agent with Knowledge Base tools"
+sidebarTitle: "Voice Agent Setup"
+description: "Configure Bolna.ai outbound voice calls backed by your Voice Agent knowledge base using webhook-based custom tools for real-time semantic search."
+---
+
+This guide walks you through configuring Bolna.ai to make outbound AI voice calls powered by the Voice Agent backend. You will trigger calls via the REST API, register the knowledge base webhook as a Custom Tool so the Bolna LLM can query your documents mid-conversation, and optionally register the product search tool for catalogue look-ups.
+
+## Prerequisites
+
+Before you begin, make sure you have the following in place:
+
+- A [Bolna.ai](https://bolna.ai) account with an active API key
+- The Voice Agent backend running with the `BOLNA_API_KEY` environment variable set
+- At least one agent already configured in the Bolna dashboard (you will need its `agent_id`)
+- The Voice Agent server accessible on a public URL so Bolna can reach the webhook endpoints (a tunnel such as ngrok works for local development)
+
+## Triggering an outbound call
+
+The `POST /api/bolna/trigger-call` endpoint initiates an outbound voice call through the Bolna.ai API. Voice Agent forwards the request to `https://api.bolna.ai/call` using your `BOLNA_API_KEY` as the Bearer token.
+
+Send a JSON body with the Bolna `agent_id`, the recipient's E.164 phone number, and an optional `variables` map. The variables are forwarded to Bolna as `user_data` so your agent prompt can reference them.
+
+```bash
+curl -X POST http://localhost:8081/api/bolna/trigger-call \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "your-bolna-agent-id",
+    "recipient_phone_number": "+1234567890",
+    "variables": {"name": "John"}
+  }'
+```
+
+The endpoint returns Bolna's response directly on success. If the `BOLNA_API_KEY` is missing or Bolna returns an HTTP error, a `500` response is raised with the full error detail.
+
+<Tip>
+  Pass `{"name": "John"}` (or any field your agent prompt references) in `variables` to personalise the opening greeting with the recipient's name without hard-coding it into the agent configuration.
+</Tip>
+
+## Registering the knowledge base webhook tool
+
+`POST /api/bolna/webhook/tool` is designed to be registered as a **Custom Tool** in the Bolna dashboard. During a live call the Bolna LLM automatically calls this endpoint whenever it decides to look up information, performs a semantic search across the `document_master` table (pgvector), and returns concatenated text results directly to the model.
+
+<Steps>
+  <Step title="Open Custom Tools in the Bolna dashboard">
+    Log in to your Bolna account, open the agent you want to equip, and navigate to the **Custom Tools** section.
+  </Step>
+  <Step title="Create a new HTTP tool">
+    Click **Add Tool** and set the request URL to:
+
+    ```
+    POST https://your-server.com/api/bolna/webhook/tool
+    ```
+
+    Replace `your-server.com` with your public domain or ngrok URL.
+  </Step>
+  <Step title="Define the request body schema">
+    Set the tool's input schema to the following JSON object. `top_k` is optional and defaults to `3`.
+
+    ```json
+    {
+      "query": "<search terms the LLM extracts from the conversation>",
+      "top_k": 3
+    }
+    ```
+  </Step>
+  <Step title="Understand the response format">
+    The webhook responds with a flat JSON object the LLM reads directly:
+
+    ```json
+    {
+      "found": true,
+      "text": "Source: product-overview.pdf\nContent: ..."
+    }
+    ```
+
+    When no matching documents are found, `found` is `false` and `text` contains a human-readable message the LLM can relay to the caller.
+  </Step>
+</Steps>
+
+## Registering the product search tool
+
+`POST /api/products/search` follows the same webhook pattern and is ideal for product catalogue queries. Unlike the knowledge base tool, it first passes the caller's natural language query through Google Gemini 2.5 Flash (via LiteLLM) to extract the core search keyword before running a case-insensitive `ILIKE` match against the `name`, `category`, `sub_category`, and `description` columns. Asking "show me everything you offer" resolves to `all` and returns up to 100 products.
+
+<Steps>
+  <Step title="Add a second Custom Tool in Bolna">
+    Create another tool in the Bolna dashboard and point it to:
+
+    ```
+    POST https://your-server.com/api/products/search
+    ```
+  </Step>
+  <Step title="Set the request body schema">
+    The payload shape is identical to the knowledge base tool:
+
+    ```json
+    {
+      "query": "<product name or category from caller>",
+      "top_k": 3
+    }
+    ```
+  </Step>
+  <Step title="Understand the response format">
+    Each matched product is formatted with its name, category path, and description, then returned in the same `found` / `text` envelope:
+
+    ```json
+    {
+      "found": true,
+      "text": "Product: Thermocouple Sensor\nCategory: Temperature -> Thermocouples\nDescription: ..."
+    }
+    ```
+  </Step>
+</Steps>
+
+## Uploading knowledge base content
+
+For the knowledge base webhook tool to return useful results, documents must be embedded and stored in the `document_master` table before calls are made. Use the `POST /api/upload_documents` endpoint to ingest PDFs, Word documents, spreadsheets, CSVs, and images. See the [Document Ingestion guide](/guides/document-ingestion) for full details on supported file types and the upload workflow.
+
+<Note>
+  Upload your knowledge base documents before making live calls. The webhook tool performs a real-time vector similarity search, so an empty `document_master` table will always return `"found": false`.
+</Note>

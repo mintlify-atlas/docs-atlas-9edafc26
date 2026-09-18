@@ -1,0 +1,90 @@
+---
+title: "POST /api/bolna/trigger-call — initiate outbound voice call"
+sidebarTitle: "Trigger Call"
+description: "Trigger an outbound Bolna.ai voice agent call by providing an agent ID, recipient phone number, and optional personalisation variables."
+---
+
+This endpoint wraps the Bolna.ai `POST https://api.bolna.ai/call` API, allowing your server to programmatically initiate outbound voice agent calls. When invoked, the server reads the `BOLNA_API_KEY` environment variable, builds the call payload, and forwards it to Bolna. Any `variables` you supply are passed to Bolna as `user_data`, making them available inside the agent's prompt at runtime.
+
+## Endpoint
+
+```
+POST /api/bolna/trigger-call
+```
+
+## Authentication
+
+No authentication is required to call this endpoint. However, the `BOLNA_API_KEY` environment variable **must** be set on the server. If it is missing, the endpoint returns HTTP 500 immediately without contacting Bolna.
+
+## Request Body
+
+<ParamField body="agent_id" type="string" required>
+  The unique identifier for your Bolna voice agent, found in the Bolna dashboard under **Agents**. Example: `ag_abc123`.
+</ParamField>
+
+<ParamField body="recipient_phone_number" type="string" required>
+  The phone number to call in [E.164](https://en.wikipedia.org/wiki/E.164) format. Must include the country code prefix. Example: `+14155550123`.
+</ParamField>
+
+<ParamField body="variables" type="object" optional>
+  An optional map of key-value pairs forwarded to Bolna as `user_data`. Use this to personalise the agent's greeting or inject account-specific information (e.g. customer name, order ID) into the agent's prompt at call time.
+
+  ```json
+  {
+    "customer_name": "Alice",
+    "account_id": "acc_9988"
+  }
+  ```
+</ParamField>
+
+## Response
+
+On success, the endpoint returns the raw JSON response from the Bolna.ai API. The exact shape is determined by Bolna; it typically includes a call ID and status.
+
+```json
+{
+  "call_id": "call_xyz789",
+  "status": "initiated"
+}
+```
+
+## Errors
+
+| HTTP Status | Cause |
+|---|---|
+| `500 Internal Server Error` | `BOLNA_API_KEY` is not set, Bolna returned a non-2xx response, or a network error occurred. |
+
+<Warning>
+  If `BOLNA_API_KEY` is absent from the server environment, the call will never be placed and a 500 error is returned immediately. Ensure the variable is configured before deploying.
+</Warning>
+
+## Example
+
+```bash
+curl -X POST https://your-server.com/api/bolna/trigger-call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "ag_abc123",
+    "recipient_phone_number": "+14155550123",
+    "variables": {
+      "customer_name": "Alice"
+    }
+  }'
+```
+
+**Example response:**
+
+```json
+{
+  "call_id": "call_xyz789",
+  "status": "initiated"
+}
+```
+
+<Note>
+  The `BOLNA_API_KEY` environment variable must be set in your server environment (e.g. via a `.env` file or your deployment platform's secrets manager) before this endpoint will function.
+</Note>
+
+<Tip>
+  Use the `variables` field to personalise the voice agent greeting with the caller's name or account details. For example, passing `"customer_name": "Alice"` lets the agent open with "Hello Alice, how can I help you today?" — improving the customer experience without any agent code changes.
+</Tip>

@@ -1,0 +1,148 @@
+---
+title: "POST /api/chatConversation — streaming AI chat with RAG"
+sidebarTitle: "Chat"
+description: "Stream real-time AI responses over SSE with Retrieval-Augmented Generation, optional file attachments, and automatic session management."
+---
+
+The `POST /api/chatConversation` endpoint is the core of the Voice Agent chat experience. It accepts a user query and an optional file upload, performs Retrieval-Augmented Generation (RAG) against your document store, and streams the AI response back token-by-token as Server-Sent Events (SSE). Sessions are created automatically on the first request and can be continued by passing a `sessionId` on subsequent turns.
+
+## Endpoint
+
+```
+POST /api/chatConversation
+```
+
+**Authentication:** Required — `Authorization: Bearer <token>`
+
+**Content-Type:** `multipart/form-data`
+
+---
+
+## Request Fields
+
+<ParamField body="userQuery" type="string" optional>
+  The user's message or question to send to the AI. Either `userQuery` or `file` (or both) must be provided.
+</ParamField>
+
+<ParamField body="sessionId" type="integer" optional>
+  The ID of an existing chat session to continue. When omitted, a new session is created automatically and its ID is returned in the `X-Session-ID` response header. When provided, the endpoint validates that the session belongs to the authenticated user and has not been deleted.
+</ParamField>
+
+<ParamField body="file" type="file" optional>
+  A file to attach to this message. Supported formats:
+
+  | Extension | Type detected |
+  |-----------|---------------|
+  | `.pdf` | PDF document |
+  | `.docx`, `.doc` | Word document |
+  | `.xlsx`, `.xls` | Excel spreadsheet |
+  | `.csv` | CSV data |
+  | `.jpg`, `.jpeg`, `.png` | Image |
+
+  The file's content is extracted, embedded, and stored as a `ChatAttachment` linked to this message. Its text is injected into the prompt automatically, and future messages in the same session can retrieve it via RAG.
+</ParamField>
+
+<Note>
+  At least one of `userQuery` or `file` must be present. Sending a request with neither field returns HTTP 400 `"No query or file provided."`.
+</Note>
+
+---
+
+## Response
+
+The endpoint returns a **Server-Sent Events** stream with `Content-Type: text/event-stream`. Each event carries one chunk of the AI's response text:
+
+```
+data: Here is the first part of the answer
+
+data:  and here is the next chunk
+
+data: [DONE]
+
+```
+
+Each line follows the standard SSE format: `data: <chunk>\n\n`.
+
+### Response Headers
+
+| Header | Description |
+|--------|-------------|
+| `X-Session-ID` | The integer ID of the chat session (new or existing). Capture this on the first call to continue the conversation. |
+| `Cache-Control` | `no-cache` |
+| `Connection` | `keep-alive` |
+| `X-Accel-Buffering` | `no` — disables proxy buffering so chunks arrive immediately |
+
+<Tip>
+  Always read the `X-Session-ID` header from the **first** response in a new conversation and pass it back as `sessionId` in subsequent requests to maintain conversation history and enable follow-up query resolution.
+</Tip>
+
+---
+
+## Error Responses
+
+| Status | Detail | Cause |
+|--------|--------|-------|
+| `400` | `Token limit exceeded. Please upgrade your plan to increase your limit.` | The authenticated user's cumulative token usage has reached or exceeded their `token_limit`. |
+| `400` | `No query or file provided.` | Both `userQuery` and `file` were omitted. |
+| `400` | `Could not extract any content from the uploaded file.` | The file was uploaded but text extraction returned no usable content. |
+| `400` | `Unsupported file: <filename>` | The uploaded file's extension is not in the supported list. |
+| `401` | Unauthorized | Bearer token missing or invalid. |
+| `404` | `Chat session not found` | The provided `sessionId` does not exist, belongs to another user, or has been soft-deleted. |
+
+<Warning>
+  If a user's token usage reaches their plan limit, all subsequent chat requests return HTTP 400 until the limit is increased. Token consumption is tracked per-user across all sessions.
+</Warning>
+
+---
+
+## Example
+
+### Basic text query (new session)
+
+```bash
+curl -N -X POST http://localhost:8081/api/chatConversation \
+  -H "Authorization: Bearer <token>" \
+  -F "userQuery=What products do you offer?"
+```
+
+### Continue an existing session
+
+```bash
+curl -N -X POST http://localhost:8081/api/chatConversation \
+  -H "Authorization: Bearer <token>" \
+  -F "userQuery=Can you expand on the second option?" \
+  -F "sessionId=42"
+```
+
+### Attach a file with a question
+
+```bash
+curl -N -X POST http://localhost:8081/api/chatConversation \
+  -H "Authorization: Bearer <token>" \
+  -F "userQuery=Summarise the key findings." \
+  -F "sessionId=42" \
+  -F "file=@/path/to/report.pdf"
+```
+
+<Note>
+  The `-N` flag disables curl's response buffering, which is required to receive SSE chunks as they arrive rather than waiting for the full response.
+</Note>
+
+---
+
+## File Uploads and RAG
+
+When a file is attached, the following steps occur before streaming begins:
+
+1. **Extraction** — Text is extracted from the file using a format-appropriate parser (PDF, Excel, CSV, DOCX, or image OCR).
+2. **Embedding** — The extracted text is embedded and stored as a `ChatAttachment` record, linked to the user chat message in the database.
+3. **Injection** — The extracted text is appended to the prompt under the heading `[Attached Document Content]:` so the model can reason about it directly.
+4. **RAG retrieval** — On subsequent turns in the same session, the stored attachment embedding is available for semantic retrieval, so the AI can reference the document even if you do not re-upload it.
+
+Only the original user query (not the extracted document text) is displayed in chat history, keeping the conversation view clean while preserving the full document context for retrieval.
+
+---
+
+## Follow-Up Query Resolution
+
+When a `sessionId` is provided, the endpoint automatically resolves ambiguous follow-up questions before sending them to the model. The last four messages of the session are fetched and used as context to rewrite questions like *"What about the third point?"* into fully self-contained queries like *"What is the third product feature mentioned in the earlier response?"* — improving RAG recall on conversational turns.

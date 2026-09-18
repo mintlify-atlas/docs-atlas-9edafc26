@@ -1,0 +1,175 @@
+---
+title: "Authentication and RBAC in Voice Agent"
+sidebarTitle: "Authentication"
+description: "How Voice Agent uses JWT Bearer tokens for stateless authentication and role_master records to enforce role-based access control across all API endpoints."
+---
+
+Voice Agent uses stateless JWT (JSON Web Token) authentication. Every protected endpoint requires a short-lived Bearer token obtained from `/api/verifyPassword`. The token encodes the user's identity, role, and token budget so the backend can authorize requests without an additional database round-trip on every call. Role-based access control is enforced at the data level through the `role_master` table, where each role carries an `is_restricted` flag that downstream code can inspect.
+
+## How authentication works
+
+The authentication flow is a straightforward two-step exchange:
+
+<Steps>
+  <Step title="Request a token">
+    `POST /api/verifyPassword` with your email and password. The server verifies the bcrypt hash via `security.verify_password()` and, on success, calls `create_authToken()` to mint a signed JWT.
+  </Step>
+  <Step title="Receive the authToken">
+    The response contains an `authToken` string and `tokenType: "bearer"`. Store this token in your client.
+  </Step>
+  <Step title="Attach the token to every subsequent request">
+    Include the token in the `Authorization` header as `Bearer <token>` on all calls to protected endpoints.
+  </Step>
+</Steps>
+
+### Obtaining a token
+
+```bash
+curl -X POST https://your-host/api/verifyPassword \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "emailId": "alice@example.com",
+      "password": "s3cr3t"
+    }
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "dataResponse": {
+    "returnCode": "SUCCESS",
+    "description": "Password verified successfully"
+  },
+  "data": {
+    "authToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "tokenType": "bearer"
+  }
+}
+```
+
+### Using the token
+
+```bash
+curl -X POST https://your-host/api/chatConversation \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -F "userQuery=What products do you offer?" \
+  -F "sessionId=42"
+```
+
+## Auth middleware
+
+`AuthMiddleware` (in `app/middleware/auth.py`) is added to the FastAPI application as a Starlette `BaseHTTPMiddleware` and intercepts every inbound HTTP request before it reaches any router handler.
+
+**Exempt paths** — the following paths bypass token validation entirely:
+
+| Path / Pattern | Reason |
+|---|---|
+| `/docs` | Swagger UI |
+| `/openapi.json` | OpenAPI schema |
+| `/api/verifyPassword` | Login endpoint — no token yet |
+| `/static/*` | Static file serving |
+| `OPTIONS` (any path) | CORS preflight |
+
+For every other path the middleware:
+
+1. Reads the `Authorization` header and checks for the `Bearer ` prefix.
+2. Calls `decode_authToken(token)` which verifies the signature and expiry using the `SECRET_KEY` and `ALGORITHM` environment variables.
+3. On success, attaches the decoded payload to `request.state.user` for downstream use.
+4. On failure (missing header, invalid signature, expired token), returns `HTTP 401` immediately.
+
+<Warning>
+  `AuthMiddleware` contains a development bypass flag:
+
+  ```python
+  bypass_auth = True  # <- set this to True to disable auth globally
+  ```
+
+  When `bypass_auth = True`, **all requests are passed through without any token validation**, regardless of the `Authorization` header. This flag must be set to `False` before deploying to any environment that handles real user data.
+</Warning>
+
+## Token structure
+
+`create_authToken()` in `app/utils/token.py` encodes the following claims into the JWT payload:
+
+| Claim | Source field | Description |
+|---|---|---|
+| `id` | `user.id` | Database primary key of the authenticated user |
+| `fullName` | `user.full_name` | Display name |
+| `emailId` | `user.email_id` | Login e-mail address |
+| `mobileNumber` | `user.mobile_number` | Registered mobile number |
+| `role` | `user.role_id` | Foreign key to `role_master.id` |
+| `token_limit` | `user.token_limit` | Lifetime token budget for this user |
+| `exp` | computed | UTC expiry timestamp (controlled by `authToken_EXPIRE_MINUTES` env var) |
+
+The token is signed with the `SECRET_KEY` environment variable using the algorithm specified in `ALGORITHM` (e.g., `HS256`). `decode_authToken()` raises `HTTP 401` for both expired tokens (`ExpiredSignatureError`) and any other JWT validation error (`JWTError`).
+
+```python
+# app/utils/token.py — JWT payload
+to_encode = {
+    "id":           user.id,
+    "fullName":     user.full_name,
+    "emailId":      user.email_id,
+    "mobileNumber": user.mobile_number,
+    "role":         user.role_id,
+    "token_limit":  user.token_limit,
+}
+```
+
+<Note>
+  The `decode_authToken()` function handles a legacy claim name: if the payload contains `user_id` instead of `id`, it is remapped automatically so existing tokens issued before the field rename remain valid.
+</Note>
+
+## Role-based access control
+
+Roles are defined in the `role_master` table. Each `UserMaster` record carries a `role_id` that references a row in `role_master`.
+
+### `role_master` columns
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `BigInteger` | Primary key |
+| `role_unique_id` | `String(255)` | Stable string identifier (e.g., `"ADMIN"`, `"USER"`) used in application logic |
+| `name` | `String(100)` | Human-readable role name |
+| `description` | `String` | Short description of the role |
+| `is_restricted` | `Integer` | `1` = this role has restricted access; `0` = unrestricted |
+
+The `role_id` encoded in the JWT payload (`role` claim) lets any service or router look up the user's role without an additional query. The `is_restricted` flag signals to application code that a given role should receive limited access to data or functionality — the exact enforcement is implemented per-endpoint in the relevant router or service.
+
+## Token usage limits
+
+Each user has a `token_limit` column in `user_master` (default **1,000,000 tokens**). The `chatConversation` endpoint enforces this limit before processing any request:
+
+```python
+stmt = select(func.sum(AIUsageMaster.total_tokens)).where(
+    AIUsageMaster.user_id == current_user.id,
+    AIUsageMaster.is_deleted == 0
+)
+result = await db.execute(stmt)
+total_used = result.scalar() or 0
+
+if current_user.token_limit is not None and total_used >= current_user.token_limit:
+    raise HTTPException(
+        status_code=400,
+        detail="Token limit exceeded. Please upgrade your plan to increase your limit."
+    )
+```
+
+When the lifetime sum of `total_tokens` across all `ai_usage_master` rows for the user meets or exceeds `token_limit`, the endpoint returns **HTTP 400** with the message `"Token limit exceeded. Please upgrade your plan to increase your limit."` No inference call is made.
+
+<Note>
+  Token limits apply to the cumulative total across all sessions, not per-session or per-day. Adjust a user's `token_limit` directly in `user_master` to increase their budget.
+</Note>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="layer-group" href="/concepts/architecture">
+    System layers and database schema
+  </Card>
+  <Card title="RAG Pipeline" icon="database" href="/concepts/rag-pipeline">
+    Hybrid semantic search with pgvector
+  </Card>
+</CardGroup>

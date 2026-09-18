@@ -1,0 +1,524 @@
+---
+title: "Role management endpoints for Voice Agent RBAC"
+sidebarTitle: "Roles"
+description: "Create, update, retrieve, and delete roles in Voice Agent's role-based access control system, including restricted role flags and unique role identifiers."
+---
+
+Voice Agent enforces access control through a role-based model. Every user record carries a `role_id` that references a row in the `role_master` table. Roles have a human-readable `name` and a machine-generated `role_unique_id` (formatted as `CUSTOM_<ROLE_NAME_UPPERCASED>`) that is used for programmatic permission checks. The optional `is_restricted` flag (`1`/`0`) lets you designate roles with tighter access boundaries. Soft-deletion is used throughout — records are never physically removed; instead the `is_deleted` flag is set to `1` by the delete endpoint. All role endpoints require a valid Bearer token.
+
+<Note>
+  All requests use `POST`. Request bodies follow the `DataRequest` envelope (`{"data": {...}}`), and all responses follow the `APIResponse` envelope described below.
+</Note>
+
+## Response envelope
+
+Every endpoint returns the following top-level shape:
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "Role retrieved successfully."
+  },
+  "data": { ... }
+}
+```
+
+| `returnCode` | Meaning         |
+|-------------|-----------------|
+| `0`         | SUCCESS         |
+| `2`         | NO_DATA_FOUND   |
+| `10`        | NOT_FOUND       |
+| `12`        | CREATED         |
+| `16`        | BAD_REQUEST     |
+
+---
+
+## Role object
+
+The `RoleResponse` schema is returned whenever a role record is included in `data`.
+
+<ResponseField name="id" type="integer" required>
+  Auto-incremented primary key of the role record.
+</ResponseField>
+
+<ResponseField name="roleUniqueId" type="string" required>
+  Stable machine identifier generated from the role name at creation time. Format: `CUSTOM_<ROLE_NAME_UPPERCASED>` — e.g. a role named `"Support Agent"` produces `CUSTOM_SUPPORT_AGENT`. Used for programmatic role checks across the application.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Human-readable role name. Must be unique across all non-deleted roles.
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Short description of the role's purpose.
+</ResponseField>
+
+<ResponseField name="isRestricted" type="integer" required>
+  `1` if this role has restricted access, `0` otherwise. Restricted roles may be subject to additional permission gates in the application layer.
+</ResponseField>
+
+<ResponseField name="isDeleted" type="integer" required>
+  Soft-delete flag. `1` means the role has been marked deleted and is excluded from all list/lookup queries.
+</ResponseField>
+
+<ResponseField name="createdOn" type="string (datetime)" required>
+  ISO 8601 timestamp of when the role was created.
+</ResponseField>
+
+<ResponseField name="createdBy" type="integer | null">
+  ID of the user who created the role.
+</ResponseField>
+
+<ResponseField name="updatedOn" type="string (datetime)" required>
+  ISO 8601 timestamp of the last update to this record.
+</ResponseField>
+
+<ResponseField name="updatedBy" type="integer | null">
+  ID of the user who last updated the role.
+</ResponseField>
+
+<ResponseField name="deletedOn" type="string (datetime) | null">
+  Timestamp at which the role was soft-deleted. `null` while the role is active.
+</ResponseField>
+
+<ResponseField name="deletedBy" type="integer | null">
+  ID of the user who performed the soft-delete. `null` while the role is active.
+</ResponseField>
+
+---
+
+## Endpoints
+
+### Add or edit a role
+
+This single endpoint handles both creation and updates. Pass `id: 0` to create a new role; pass the existing numeric `id` to update it. On creation the service auto-generates `role_unique_id`; this value cannot be set or changed by the caller.
+
+```
+POST /addEditRole
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+Wrap the payload in `{"data": {...}}`.
+
+<ParamField body="id" type="integer" default="0">
+  Pass `0` to create a new role. Pass the integer primary key of an existing role to update it.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Unique display name for the role. Returns `400 Bad Request` if another non-deleted role already uses this name.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Short description of the role.
+</ParamField>
+
+<ParamField body="isRestricted" type="integer" default="0">
+  Set to `1` to mark this role as restricted. Defaults to `0`.
+</ParamField>
+
+#### Response
+
+Returns an `APIResponse` with `data` containing the created or updated `RoleResponse` object.
+
+- **Create** → `returnCode: 12` (CREATED), `description: "Role created successfully"`
+- **Update** → `returnCode: 0` (SUCCESS), `description: "Role updated successfully"`
+
+#### Examples
+
+**Create a new role**
+
+```bash
+curl -X POST https://api.example.com/addEditRole \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 0,
+      "name": "Support Agent",
+      "description": "Front-line support",
+      "isRestricted": 0
+    }
+  }'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 12,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "Role created successfully"
+  },
+  "data": {
+    "id": 5,
+    "roleUniqueId": "CUSTOM_SUPPORT_AGENT",
+    "name": "Support Agent",
+    "description": "Front-line support",
+    "isRestricted": 0,
+    "isDeleted": 0,
+    "createdOn": "2024-01-15T10:30:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T10:30:00",
+    "updatedBy": 1,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+**Update an existing role**
+
+```bash
+curl -X POST https://api.example.com/addEditRole \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 5,
+      "name": "Senior Support Agent",
+      "description": "Escalation support",
+      "isRestricted": 1
+    }
+  }'
+```
+
+---
+
+### Delete a role
+
+Soft-deletes a role by setting `is_deleted = 1`. The record is retained in the database; it will no longer appear in list or lookup queries.
+
+```
+POST /deleteRole
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="id" type="integer" required>
+  Primary key of the role to delete. Returns `404 Not Found` if the role does not exist or is already deleted.
+</ParamField>
+
+#### Response
+
+Returns an `APIResponse` with `returnCode: 0` and no `data` payload on success.
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/deleteRole \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 5
+    }
+  }'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T11:00:00",
+    "description": "Role with ID 5 marked as deleted successfully."
+  },
+  "data": null
+}
+```
+
+<Warning>
+  Deleting a role does not automatically remove or reassign users currently holding that `role_id`. Ensure no active users are assigned to the role before deleting it to avoid orphaned user records.
+</Warning>
+
+---
+
+### Get all roles
+
+Returns all non-deleted roles in the system. No request body is required.
+
+```
+POST /getRoleList
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+No body is needed. Send an empty `POST` request.
+
+#### Response
+
+Returns `data` as an array of `RoleResponse` objects. If no roles exist, `returnCode` is `2` (NO_DATA_FOUND) and `data` is an empty array `[]`.
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/getRoleList \
+  -H "Authorization: Bearer <token>"
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:35:00",
+    "description": "Roles retrieved successfully."
+  },
+  "data": [
+    {
+      "id": 1,
+      "roleUniqueId": "CUSTOM_ADMIN",
+      "name": "Admin",
+      "description": "Full access",
+      "isRestricted": 0,
+      "isDeleted": 0,
+      "createdOn": "2024-01-01T00:00:00",
+      "createdBy": 1,
+      "updatedOn": "2024-01-01T00:00:00",
+      "updatedBy": 1,
+      "deletedOn": null,
+      "deletedBy": null
+    },
+    {
+      "id": 2,
+      "roleUniqueId": "CUSTOM_SUPPORT_AGENT",
+      "name": "Support Agent",
+      "description": "Front-line support",
+      "isRestricted": 0,
+      "isDeleted": 0,
+      "createdOn": "2024-01-15T10:30:00",
+      "createdBy": 1,
+      "updatedOn": "2024-01-15T10:30:00",
+      "updatedBy": 1,
+      "deletedOn": null,
+      "deletedBy": null
+    }
+  ]
+}
+```
+
+---
+
+### Get a specific role
+
+Fetches a single role by its numeric primary key.
+
+```
+POST /getSpecificRole
+```
+
+**Authentication:** Bearer token required.
+
+#### Request body
+
+<ParamField body="id" type="integer" required>
+  Primary key of the role to retrieve. Returns `returnCode: 2` (NO_DATA_FOUND) if the ID is not found or the role is soft-deleted.
+</ParamField>
+
+#### Response
+
+Returns `data` as a single `RoleResponse` object.
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/getSpecificRole \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "id": 2
+    }
+  }'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:40:00",
+    "description": "Role with ID 2 retrieved successfully."
+  },
+  "data": {
+    "id": 2,
+    "roleUniqueId": "CUSTOM_SUPPORT_AGENT",
+    "name": "Support Agent",
+    "description": "Front-line support",
+    "isRestricted": 0,
+    "isDeleted": 0,
+    "createdOn": "2024-01-15T10:30:00",
+    "createdBy": 1,
+    "updatedOn": "2024-01-15T10:30:00",
+    "updatedBy": 1,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+---
+
+## RBAC data model
+
+The diagram below shows how roles fit into the broader access-control model.
+
+```
+role_master
+    └─ id ──────────────────────────────► user_master.role_id
+    └─ id ──────────────────────────────► role_privileges_mapping.role_id
+                                                │
+                                                └─ privilege_id ──► privileges_master.privilege_unique_id
+                                                                          │
+                                                                          └─ menu_id ──► menu_hierarchy.id
+```
+
+- **`role_master`** — Defines named roles; each row has a `role_unique_id` used in code-level checks.
+- **`role_privileges_mapping`** — Junction table linking a `role_id` to one or many `privilege_id` strings.
+- **`privileges_master`** — Defines granular privileges (each tied to a `menu_id` in the navigation hierarchy).
+- **`menu_hierarchy`** — Tree of UI menu items. Each node has a `menu_unique_id`, a `parent_id` for nesting, and an `entity_url` that links the menu entry to a backend route.
+
+## Menu hierarchy and privileges (read-only)
+
+The menu hierarchy and privilege records are read-only reference endpoints. Neither requires authentication.
+
+### Get menu hierarchy
+
+Returns the full active navigation tree. No request body required.
+
+```
+POST /getMenuHierarchy
+```
+
+**Authentication:** Not required.
+
+#### Response fields
+
+<ResponseField name="id" type="integer" required>
+  Primary key of the menu item.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Internal name of the menu node.
+</ResponseField>
+
+<ResponseField name="dispName" type="string" required>
+  Display label shown in the UI.
+</ResponseField>
+
+<ResponseField name="parentId" type="integer | null">
+  Primary key of the parent menu node. Top-level nodes use `0` or `null`.
+</ResponseField>
+
+<ResponseField name="parentUniqueId" type="string | null">
+  Unique string identifier of the parent node, for tree traversal without relying on integer IDs.
+</ResponseField>
+
+<ResponseField name="entityUrl" type="string" required>
+  Backend route path associated with this menu entry.
+</ResponseField>
+
+<ResponseField name="menuIcon" type="string | null">
+  Icon class or path for the menu item.
+</ResponseField>
+
+<ResponseField name="description" type="string | null">
+  Optional description of the menu node.
+</ResponseField>
+
+<ResponseField name="isActive" type="integer" required>
+  `1` if the item is active and should be rendered; `0` if hidden.
+</ResponseField>
+
+<ResponseField name="menuUniqueId" type="string | null">
+  Stable string identifier for programmatic menu lookups.
+</ResponseField>
+
+<ResponseField name="displayOrder" type="integer | null">
+  Sort order among sibling nodes.
+</ResponseField>
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/getMenuHierarchy
+```
+
+---
+
+### Get all privileges
+
+Returns all privilege definitions mapped to menu nodes.
+
+```
+POST /getAllPrivileges
+```
+
+**Authentication:** Not required.
+
+#### Response fields
+
+<ResponseField name="id" type="integer" required>
+  Primary key of the privilege.
+</ResponseField>
+
+<ResponseField name="privilegeUniqueId" type="string" required>
+  Stable machine identifier for the privilege, referenced by `role_privileges_mapping.privilege_id`.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Human-readable name of the privilege.
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Short description of what the privilege grants.
+</ResponseField>
+
+<ResponseField name="menuId" type="integer" required>
+  Foreign key linking this privilege to a node in `menu_hierarchy`.
+</ResponseField>
+
+<ResponseField name="isDeleted" type="integer" required>
+  Soft-delete flag. `1` means the privilege is inactive.
+</ResponseField>
+
+#### Example
+
+```bash
+curl -X POST https://api.example.com/getAllPrivileges
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:45:00",
+    "description": "Privileges retrieved successfully."
+  },
+  "data": [
+    {
+      "id": 1,
+      "privilegeUniqueId": "PRIV_VIEW_DASHBOARD",
+      "name": "View Dashboard",
+      "description": "Access main dashboard",
+      "menuId": 3,
+      "isDeleted": 0,
+      "createdOn": "2024-01-01T00:00:00",
+      "createdBy": 1,
+      "updatedOn": "2024-01-01T00:00:00",
+      "updatedBy": 1,
+      "deletedOn": null,
+      "deletedBy": null
+    }
+  ]
+}
+```
+
+<Tip>
+  To build a role permissions editor in your UI, first call `getAllPrivileges` to load all available privileges, then call `getRoleList` to load existing roles. Display the privileges grouped by their `menuId` node from `getMenuHierarchy` for a tree-structured permission picker.
+</Tip>

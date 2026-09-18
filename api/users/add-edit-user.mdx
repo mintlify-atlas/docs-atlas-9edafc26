@@ -1,0 +1,243 @@
+---
+title: "POST /api/addEditUser — create or update a user"
+sidebarTitle: "Add / Edit User"
+description: "Creates a new managed user account or updates an existing one. Pass id=0 to create; pass a real user ID to update fields and optionally change the password."
+---
+
+The `addEditUser` endpoint provides a single surface for administrative user management. The behavior is controlled entirely by the `id` field in the request: send `id: 0` to create a brand-new user — the server will auto-generate a random password and email it to the new account — or send a real user ID to update that user's profile fields. This endpoint requires a valid bearer token and is intended for administrators or privileged users, not for end-user self-service (see [Sign Up](/api/users/sign-up) for that flow).
+
+```
+POST /api/addEditUser
+```
+
+## Authentication
+
+<Note>
+  **Authentication required.** Include a valid JWT in the `Authorization` header:
+  ```
+  Authorization: Bearer <authToken>
+  ```
+  Requests without a valid token receive a `401 Unauthorized` HTTP error.
+</Note>
+
+## Request Body
+
+<ParamField body="data" type="object" required>
+  The `DataRequest` wrapper containing a `UserMasterAddEdit` payload.
+
+  <Expandable title="data fields">
+    <ParamField body="id" type="integer" required>
+      Controls create vs. update mode:
+      - `0` — create a new user. A random 8-character password is generated and sent to the provided email.
+      - Any positive integer — update the existing user with that primary key.
+    </ParamField>
+
+    <ParamField body="email" type="string" required>
+      The user's email address. Must be unique among active (non-deleted) users when creating (`id: 0`). When updating, this replaces the stored email.
+    </ParamField>
+
+    <ParamField body="fullName" type="string">
+      The user's display name. Optional on update; if omitted the existing value is unchanged.
+    </ParamField>
+
+    <ParamField body="mobileNumber" type="string">
+      The user's mobile/phone number. Optional on update; if omitted the existing value is unchanged.
+    </ParamField>
+
+    <ParamField body="roleId" type="integer" required>
+      Numeric role identifier to assign to the user (e.g. admin, student). Required for both create and update operations.
+    </ParamField>
+
+    <ParamField body="password" type="string">
+      New password for the user. **Optional on update** — if omitted, the user's existing password is left unchanged. Ignored during create (a random password is generated instead and emailed to the user).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "User created successfully"
+  },
+  "data": {
+    "id": 42,
+    "roleId": 2,
+    "fullName": "Bob Johnson",
+    "emailId": "bob@example.com",
+    "mobileNumber": "+14155550101",
+    "isDeleted": 0,
+    "isActive": 1,
+    "createdOn": "2024-01-15T10:30:00.123456",
+    "createdBy": null,
+    "updatedOn": null,
+    "updatedBy": null,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+<ResponseField name="dataResponse" type="object">
+  Top-level metadata about the result.
+
+  <Expandable title="dataResponse fields">
+    <ResponseField name="returnCode" type="integer">
+      `0` on success. See [Error Codes](#error-codes) for failure values.
+    </ResponseField>
+
+    <ResponseField name="responseDateTime" type="string (ISO 8601)">
+      Server timestamp of when the response was generated.
+    </ResponseField>
+
+    <ResponseField name="description" type="string">
+      `"User created successfully"` for new users or `"User updated successfully"` for edits.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The `UserMasterResponse` object reflecting the created or updated user. `null` on error.
+
+  <Expandable title="data fields">
+    <ResponseField name="id" type="integer">
+      The user's primary key.
+    </ResponseField>
+
+    <ResponseField name="roleId" type="integer">
+      The numeric role assigned to the user.
+    </ResponseField>
+
+    <ResponseField name="fullName" type="string | null">
+      The user's display name.
+    </ResponseField>
+
+    <ResponseField name="emailId" type="string">
+      The user's email address.
+    </ResponseField>
+
+    <ResponseField name="mobileNumber" type="string | null">
+      The user's mobile number.
+    </ResponseField>
+
+    <ResponseField name="isDeleted" type="integer">
+      Soft-delete flag. `0` = active, `1` = deleted.
+    </ResponseField>
+
+    <ResponseField name="isActive" type="integer">
+      Account active status. `1` = active.
+    </ResponseField>
+
+    <ResponseField name="createdOn" type="string (ISO 8601)">
+      Timestamp when the record was first created.
+    </ResponseField>
+
+    <ResponseField name="updatedOn" type="string | null">
+      Timestamp of the most recent update. `null` if never updated.
+    </ResponseField>
+
+    <ResponseField name="updatedBy" type="integer | null">
+      ID of the user who last modified this record.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Create a new user
+
+```bash
+curl -X POST https://your-api-host/api/addEditUser \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <authToken>" \
+  -d '{
+    "data": {
+      "id": 0,
+      "email": "bob@example.com",
+      "fullName": "Bob Johnson",
+      "mobileNumber": "+14155550101",
+      "roleId": 2
+    }
+  }'
+```
+
+**Response** — a random password has been generated and sent to `bob@example.com`:
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00.123456",
+    "description": "User created successfully"
+  },
+  "data": {
+    "id": 42,
+    "roleId": 2,
+    "fullName": "Bob Johnson",
+    "emailId": "bob@example.com",
+    "mobileNumber": "+14155550101",
+    "isDeleted": 0,
+    "isActive": 1,
+    "createdOn": "2024-01-15T10:30:00.123456",
+    "createdBy": null,
+    "updatedOn": null,
+    "updatedBy": null,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+### Update an existing user
+
+```bash
+curl -X POST https://your-api-host/api/addEditUser \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <authToken>" \
+  -d '{
+    "data": {
+      "id": 42,
+      "email": "bob.johnson@example.com",
+      "fullName": "Robert Johnson",
+      "mobileNumber": "+14155550199",
+      "roleId": 2,
+      "password": "newP@ssw0rd"
+    }
+  }'
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T11:00:00.000000",
+    "description": "User updated successfully"
+  },
+  "data": {
+    "id": 42,
+    "roleId": 2,
+    "fullName": "Robert Johnson",
+    "emailId": "bob.johnson@example.com",
+    "mobileNumber": "+14155550199",
+    "isDeleted": 0,
+    "isActive": 1,
+    "createdOn": "2024-01-15T10:30:00.123456",
+    "createdBy": null,
+    "updatedOn": "2024-01-15T11:00:00.000000",
+    "updatedBy": 1,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+## Error Codes
+
+| `returnCode` | Name          | Description                                                                                    |
+|--------------|---------------|------------------------------------------------------------------------------------------------|
+| `0`          | `SUCCESS`     | User created or updated successfully; record returned in `data`.                               |
+| `10`         | `NOT_FOUND`   | `id` was non-zero but no active user with that ID exists.                                      |
+| `16`         | `BAD_REQUEST` | When creating (`id: 0`), an active user with the provided email already exists.                |

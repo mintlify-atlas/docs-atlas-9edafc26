@@ -1,47 +1,150 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get started with Voice Agent in 5 minutes"
+sidebarTitle: "Quickstart"
+description: "Clone Voice Agent, configure your environment variables, apply database migrations, and make your first authenticated API request — all in under five minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+Voice Agent is a self-hosted FastAPI service. Getting it running locally requires a PostgreSQL database with the `pgvector` extension, a Google API key for Gemini embeddings and chat, and optionally a Bolna API key if you want to trigger outbound voice calls. All other dependencies are installed from `requirements.txt`. The server listens on port `8081` by default.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure you have the following available:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Python 3.10 or later** — the application uses async syntax and type hints that require 3.10+
+- **PostgreSQL 15 or later** with the `pgvector` extension installed in the target database
+- **A Google API Key** with access to the Gemini API (used for both LLM chat and embedding generation)
+- **A Bolna API Key** *(optional)* — only required if you intend to use the outbound voice call endpoints
 
-## Get started
+<Note>
+  pgvector must be installed inside your PostgreSQL instance before running migrations. On most systems you can install it with `apt install postgresql-15-pgvector` (Debian/Ubuntu) or by following the [pgvector installation guide](https://github.com/pgvector/pgvector#installation). Once installed, enable it in your target database with `CREATE EXTENSION IF NOT EXISTS vector;`.
+</Note>
+
+## Steps
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository and install dependencies">
+    Clone the repository, create a virtual environment, and install all Python packages:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/your-org/Voice_Agent.git
+    cd Voice_Agent
+    python -m venv .venv
+    source .venv/bin/activate        # Windows: .venv\Scripts\activate
+    pip install -r requirements.txt
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Create your .env file">
+    Copy the template below into a file named `.env` in the project root and fill in at minimum the required values. Every variable is described in full on the [Configuration](/configuration) page.
 
     ```bash
-    your-cli init
+    # .env — minimum required configuration
+    SECRET_KEY=change-me-to-a-long-random-string
+    PG_DB_HOST=localhost
+    PG_DB_PORT=5433
+    PG_DB_USER=postgres
+    PG_DB_PASSWORD=your_postgres_password
+    PG_DB_NAME=maths_care
+    GOOGLE_API_KEY=your_google_api_key_here
+    ```
+
+    <Tip>
+      Generate a strong `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. The default value `"test"` in the source code is intentionally weak and must not be used in any shared or production environment.
+    </Tip>
+  </Step>
+
+  <Step title="Apply database migrations">
+    Voice Agent uses Alembic for schema migrations. Run the following `make` target to apply all pending migrations to your PostgreSQL database:
+
+    ```bash
+    make upgrade
+    ```
+
+    This runs `alembic upgrade head` under the hood. You can inspect the full migration history at any time with `make history`.
+  </Step>
+
+  <Step title="Start the development server">
+    Launch the server with:
+
+    ```bash
+    python startup.py
+    ```
+
+    Uvicorn will start with hot-reload enabled and bind to all interfaces on port `8081`. You should see output similar to:
+
+    ```
+    INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
+    INFO:     Started reloader process [...]
+    INFO:     Started server process [...]
+    INFO:     Application startup complete.
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Verify the server is running">
+    Send a quick health-check request to the root endpoint:
 
     ```bash
-    your-cli start
+    curl http://localhost:8081/
     ```
+
+    You should receive:
+
+    ```json
+    {"message": "FastAPI Boilerplate is running ✅"}
+    ```
+  </Step>
+
+  <Step title="Explore the interactive API docs">
+    FastAPI generates an interactive Swagger UI automatically. Open the following URL in your browser to browse all available endpoints, inspect request/response schemas, and send test requests directly from the UI:
+
+    ```
+    http://localhost:8081/docs
+    ```
+
+    An alternative ReDoc interface is available at `http://localhost:8081/redoc`.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## First authenticated request
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+Most Voice Agent endpoints require a valid JWT token in the `Authorization` header. The login endpoint is `POST /api/verifyPassword`. It accepts an email address and password, and returns an `authToken` you pass as a Bearer token on all subsequent requests.
+
+**Step 1 — Obtain a token:**
+
+```bash
+curl -s -X POST http://localhost:8081/api/verifyPassword \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "emailId": "user@example.com",
+      "password": "your_password"
+    }
+  }'
+```
+
+A successful response looks like:
+
+```json
+{
+  "dataResponse": {
+    "returnCode": "SUCCESS",
+    "description": "Password verified successfully"
+  },
+  "data": {
+    "authToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "tokenType": "bearer"
+  }
+}
+```
+
+**Step 2 — Use the token on a protected endpoint:**
+
+Copy the `authToken` value and pass it as a `Bearer` token. For example, to retrieve all active users:
+
+```bash
+curl -s -X POST http://localhost:8081/api/getAllUsers \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+Tokens expire after the number of minutes set in `authToken_EXPIRE_MINUTES` (default: `3600` minutes). Once expired, re-authenticate via `/api/verifyPassword` to obtain a fresh token.

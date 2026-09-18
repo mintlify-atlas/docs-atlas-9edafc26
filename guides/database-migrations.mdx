@@ -1,0 +1,127 @@
+---
+title: "Manage database schema migrations with Alembic"
+sidebarTitle: "DB Migrations"
+description: "Run, create, and roll back Voice Agent database schema migrations using Alembic and the project Makefile shortcuts for common migration tasks."
+---
+
+Voice Agent uses [Alembic](https://alembic.sqlalchemy.org/) to version-control the PostgreSQL schema. Every table — including `document_master` with its pgvector `Vector(3072)` column, `chat_attachments`, and the RBAC tables — is managed through migration scripts stored in `alembic/versions/`. A thin Makefile wraps the most common Alembic commands so you rarely need to type the full `alembic` CLI invocations by hand.
+
+## Prerequisites
+
+Before running any migration you need a running PostgreSQL instance with the **pgvector** extension enabled in the target database:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+pgvector must be present before `make upgrade` is run because the initial migration creates `Vector(3072)` columns in both `document_master` and `chat_attachments`. You also need the following environment variables set in your `.env` file (read by `alembic/env.py` via `app.core.config.settings`):
+
+| Variable | Description |
+|---|---|
+| `MYSQL_DB_HOST` | Database host (e.g. `localhost`) |
+| `MYSQL_DB_PORT` | Database port (e.g. `5432`) |
+| `MYSQL_DB_USER` | Database user |
+| `MYSQL_DB_PASSWORD` | Database password |
+| `MYSQL_DB_NAME` | Database name |
+
+<Note>
+  `alembic/env.py` constructs a `postgresql+asyncpg` async URL from these settings at runtime, overriding the placeholder URL in `alembic.ini`. The async engine uses `pool_pre_ping=True` to recover gracefully from stale connections.
+</Note>
+
+## Available commands
+
+All migration operations are available as Makefile targets. Run them from the project root where the `Makefile` lives.
+
+| Command | Alembic equivalent | What it does |
+|---|---|---|
+| `make upgrade` | `alembic upgrade head` | Applies all pending migrations up to the latest revision |
+| `make migrate m="description"` | `alembic revision --autogenerate -m "description"` | Auto-generates a new migration by diffing your SQLAlchemy models against the live schema |
+| `make downgrade` | `alembic downgrade -1` | Rolls back the most recently applied migration |
+| `make downgrade n=3` | `alembic downgrade -3` | Rolls back the last *N* migrations (pass any integer via `n=`) |
+| `make history` | `alembic history --verbose` | Prints the full migration history with revision IDs and descriptions |
+| `make reset` | `alembic downgrade base` | Rolls back **all** migrations, returning the schema to its empty initial state |
+
+## Running your first migration
+
+Follow these steps on a fresh environment to initialise the database schema:
+
+<Steps>
+  <Step title="Set database connection variables">
+    Create or update your `.env` file in the project root with the five PostgreSQL variables listed above. Alembic reads them through `app.core.config.settings` when `env.py` is loaded.
+  </Step>
+  <Step title="Apply all migrations">
+    Run the upgrade command from the project root:
+
+    ```bash
+    make upgrade
+    ```
+
+    Alembic prints each revision it applies. A successful run ends with:
+
+    ```
+    INFO  [alembic.runtime.migration] Running upgrade  -> <rev>, <description>
+    ```
+  </Step>
+  <Step title="Verify the tables exist">
+    Connect to your database and list the tables:
+
+    ```bash
+    psql -U <user> -d <database> -c "\dt"
+    ```
+
+    You should see tables including `document_master`, `chat_attachments`, `user_master`, `role_master`, and others defined in `app/models/`.
+  </Step>
+</Steps>
+
+## Creating a migration after model changes
+
+Whenever you add or modify a SQLAlchemy model, generate a corresponding migration so the change is tracked and reproducible across environments.
+
+<Steps>
+  <Step title="Edit or create a model in app/models/">
+    Make your changes to any file under `app/models/`. For example, add a new column to `user_master.py`:
+
+    ```python
+    phone_number = Column(String(20), nullable=True)
+    ```
+  </Step>
+  <Step title="Auto-generate the migration script">
+    Run `make migrate` with a short description in the `m` variable:
+
+    ```bash
+    make migrate m="add phone_number to user_master"
+    ```
+
+    Alembic compares your models' metadata (imported via `target_metadata = Base.metadata` in `env.py`) against the live database schema and writes a new file to `alembic/versions/`.
+  </Step>
+  <Step title="Review the generated file">
+    Open the new file in `alembic/versions/` and confirm the `upgrade()` and `downgrade()` functions look correct. Auto-generate is not infallible — column type changes and vector columns in particular may need manual adjustment.
+  </Step>
+  <Step title="Apply the migration">
+    Once you are satisfied with the generated script, apply it:
+
+    ```bash
+    make upgrade
+    ```
+  </Step>
+</Steps>
+
+## Rolling back a migration
+
+To undo the last migration (for example, after a bad deployment):
+
+```bash
+make downgrade
+```
+
+To roll back a specific number of steps — say, three migrations:
+
+```bash
+make downgrade n=3
+```
+
+Use `make history` to inspect revision IDs and pick the right rollback depth before running a downgrade in a shared environment.
+
+<Warning>
+  **`make reset` will drop all schema objects managed by Alembic, deleting every table and all data they contain.** Never run this against a production or shared staging database without first taking a full backup. It is intended only for local development resets.
+</Warning>

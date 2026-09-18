@@ -1,0 +1,150 @@
+---
+title: "Configure Voice Agent environment variables"
+sidebarTitle: "Configuration"
+description: "Complete reference for every environment variable Voice Agent reads at startup, with defaults, types, and guidance on which values are required for each feature."
+---
+
+Voice Agent loads all runtime configuration from a `.env` file in the project root (or from the process environment) using `python-dotenv`. The `Settings` class in `app/core/config.py` reads each variable with `os.getenv`, falling back to a safe default where one is defined. Variables without a default must be set explicitly before starting the server — omitting them will cause the related feature to fail or the application to refuse to start.
+
+<Warning>
+  Never commit your `.env` file to source control. The `SECRET_KEY` default of `"test"` is intentionally insecure and is only acceptable for a first local run on a developer machine. Rotate it to a cryptographically random value before sharing the environment with anyone or deploying to any server.
+</Warning>
+
+## Authentication
+
+<ParamField path="SECRET_KEY" type="string" required>
+  The secret used to sign and verify JWT tokens. Any string works, but a 32-byte hex value generated with `python -c "import secrets; print(secrets.token_hex(32))"` is strongly recommended. Defaults to `"test"` — **never use this default outside of local development**.
+</ParamField>
+
+<ParamField path="ALGORITHM" type="string" default="HS256">
+  The JWT signing algorithm passed to `python-jose`. `HS256` is the symmetric HMAC-SHA-256 algorithm and is appropriate for single-server deployments. Change to `RS256` and supply an RSA key pair if you need asymmetric signing.
+</ParamField>
+
+<ParamField path="authToken_EXPIRE_MINUTES" type="integer" default="3600">
+  How long an issued JWT remains valid, expressed in minutes. The default of `3600` equals 60 hours. Lower this value for more security-sensitive deployments.
+</ParamField>
+
+## PostgreSQL database
+
+<ParamField path="PG_DB_HOST" type="string" default="localhost">
+  Hostname or IP address of the PostgreSQL server. Use the service name (e.g. `db`) when running inside Docker Compose.
+</ParamField>
+
+<ParamField path="PG_DB_PORT" type="integer" default="5433">
+  Port the PostgreSQL server listens on. Note the default is `5433`, not the standard `5432` — adjust if your installation uses a different port.
+</ParamField>
+
+<ParamField path="PG_DB_USER" type="string" default="postgres">
+  PostgreSQL username used to connect. The user must have `CREATE TABLE` privileges on the target database to allow Alembic migrations to run.
+</ParamField>
+
+<ParamField path="PG_DB_PASSWORD" type="string" required>
+  Password for `PG_DB_USER`. The source code falls back to `"12345"` if this variable is absent, but that default should never be relied on in any environment.
+</ParamField>
+
+<ParamField path="PG_DB_NAME" type="string" default="maths_care">
+  Name of the PostgreSQL database. The database must exist before running `make upgrade`, and the `pgvector` extension must be enabled inside it.
+</ParamField>
+
+<ParamField path="PG_DB_POOL_RECYCLE" type="integer" default="1800">
+  Number of seconds after which SQLAlchemy recycles idle connections in the pool. The default of `1800` (30 minutes) prevents stale connection errors on databases that aggressively terminate idle sessions.
+</ParamField>
+
+## LLM and embeddings
+
+<ParamField path="GOOGLE_API_KEY" type="string" required>
+  API key for Google Generative AI. Used by both the embedding service (to generate pgvector embeddings for semantic search) and by LiteLLM when routing requests to `gemini/gemini-2.5-flash`. Obtain a key from the [Google AI Studio](https://aistudio.google.com/app/apikey).
+</ParamField>
+
+<ParamField path="INPUT_TOKEN_COST" type="float" default="0.0">
+  Cost per one million input (prompt) tokens, in your chosen currency unit. This value is multiplied against the token count reported by the Gemini API to track spend in the `ai_usage_master` table. Set to the per-million-token rate from your billing agreement, e.g. `0.15` for $0.15 / 1M tokens.
+</ParamField>
+
+<ParamField path="OUTPUT_TOKEN_COST" type="float" default="0.0">
+  Cost per one million output (completion) tokens. Works identically to `INPUT_TOKEN_COST` but applied to generated tokens.
+</ParamField>
+
+## Voice calls (Bolna.ai)
+
+<ParamField path="BOLNA_API_KEY" type="string" required="for voice calls">
+  Bearer token used to authenticate requests to `https://api.bolna.ai/call`. Obtain it from the Bolna dashboard under **Settings → API Keys**. If this variable is unset, calls to the `/api/bolna` endpoints will return `{"status": "error", "message": "BOLNA_API_KEY is not configured"}` without attempting the outbound call.
+</ParamField>
+
+## Email (SMTP)
+
+<ParamField path="SMTP_SERVER" type="string" default="smtp.gmail.com">
+  Hostname of the SMTP server used to send password-reset and notification emails.
+</ParamField>
+
+<ParamField path="SMTP_PORT" type="integer" default="465">
+  SMTP port. `465` is the standard port for SMTPS (implicit TLS). Use `587` if your provider requires STARTTLS instead.
+</ParamField>
+
+<ParamField path="SMTP_USERNAME" type="string">
+  SMTP authentication username (usually the sender email address). No default — leave unset to skip SMTP authentication.
+</ParamField>
+
+<ParamField path="SMTP_PASSWORD" type="string">
+  SMTP authentication password or app-specific password. For Gmail, generate a 16-character app password under **Google Account → Security → App passwords**.
+</ParamField>
+
+<ParamField path="SMTP_FROM_EMAIL" type="string">
+  The `From:` address that appears on outgoing emails. Must be a valid address accepted by your SMTP provider.
+</ParamField>
+
+---
+
+## Minimal .env example
+
+The following configuration is sufficient to start the server and use LLM chat and document search. Voice call and email features will be unavailable.
+
+```bash
+# Minimum required configuration
+SECRET_KEY=replace-with-a-32-byte-random-hex-string
+ALGORITHM=HS256
+authToken_EXPIRE_MINUTES=3600
+
+PG_DB_HOST=localhost
+PG_DB_PORT=5433
+PG_DB_USER=postgres
+PG_DB_PASSWORD=your_postgres_password
+PG_DB_NAME=maths_care
+
+GOOGLE_API_KEY=AIzaSy...
+```
+
+## Full production .env example
+
+```bash
+# ── Authentication ──────────────────────────────────────────────
+SECRET_KEY=4f3a8c2e1b7d9f6a0e5c4b3a2d1f8e7c9b0a6d5e4c3b2a1f0e9d8c7b6a5f4e3
+ALGORITHM=HS256
+authToken_EXPIRE_MINUTES=60
+
+# ── PostgreSQL ──────────────────────────────────────────────────
+PG_DB_HOST=db.internal.example.com
+PG_DB_PORT=5432
+PG_DB_USER=voice_agent
+PG_DB_PASSWORD=super-secret-db-password
+PG_DB_NAME=voice_agent_prod
+PG_DB_POOL_RECYCLE=1800
+
+# ── LLM & embeddings ────────────────────────────────────────────
+GOOGLE_API_KEY=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ1234567
+INPUT_TOKEN_COST=0.15
+OUTPUT_TOKEN_COST=0.60
+
+# ── Bolna voice calls ───────────────────────────────────────────
+BOLNA_API_KEY=bln_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# ── SMTP / email ────────────────────────────────────────────────
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USERNAME=noreply@example.com
+SMTP_PASSWORD=abcd efgh ijkl mnop
+SMTP_FROM_EMAIL=noreply@example.com
+```
+
+<Tip>
+  In containerised deployments, inject these values as environment variables directly into the container rather than bundling a `.env` file in the image. Tools such as Docker secrets, AWS Secrets Manager, or HashiCorp Vault integrate cleanly with `python-dotenv`'s fallback to `os.environ`.
+</Tip>

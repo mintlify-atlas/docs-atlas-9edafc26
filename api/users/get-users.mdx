@@ -1,0 +1,257 @@
+---
+title: "GET Users — getAllUsers, getSpecificUser, getCurrentUser"
+sidebarTitle: "Get Users"
+description: "Three authenticated endpoints to list all active users, look up a single user by ID, or retrieve the profile of the currently authenticated caller."
+---
+
+Voice Agent exposes three read endpoints for user data. `getAllUsers` returns every non-deleted user in the system — useful for admin dashboards or user-picker UIs. `getSpecificUser` fetches a single user by their numeric ID. `getCurrentUser` derives the caller's identity directly from the JWT, making it ideal for populating a "My Profile" view without needing to know the user's ID in advance. All three endpoints require a valid bearer token.
+
+---
+
+## POST /api/getAllUsers
+
+Retrieves a list of all users whose `is_deleted` flag is `0` (i.e. not soft-deleted). Returns an empty-result code when no active users exist.
+
+```
+POST /api/getAllUsers
+```
+
+### Authentication
+
+<Note>
+  **Authentication required.** Include a valid JWT in the `Authorization` header:
+  ```
+  Authorization: Bearer <authToken>
+  ```
+</Note>
+
+### Request Body
+
+No request body payload is needed. You may send an empty JSON object or omit the body entirely:
+
+```json
+{}
+```
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "Active users retrieved successfully"
+  },
+  "data": [
+    {
+      "id": 1,
+      "roleId": 2,
+      "fullName": "Alice Smith",
+      "emailId": "alice@example.com",
+      "mobileNumber": "+14155550100",
+      "isDeleted": 0,
+      "isActive": 1,
+      "createdOn": "2024-01-10T08:00:00.000000"
+    }
+  ]
+}
+```
+
+<ResponseField name="data" type="array of UserMasterResponse">
+  An array of user objects. Empty array `[]` is never returned — a `NOT_FOUND` result code is used instead when there are no active users.
+
+  <Expandable title="Each UserMasterResponse object">
+    <ResponseField name="id" type="integer">The user's primary key.</ResponseField>
+    <ResponseField name="roleId" type="integer">Numeric role identifier.</ResponseField>
+    <ResponseField name="fullName" type="string | null">The user's display name.</ResponseField>
+    <ResponseField name="emailId" type="string">The user's email address.</ResponseField>
+    <ResponseField name="mobileNumber" type="string | null">The user's mobile number.</ResponseField>
+    <ResponseField name="isDeleted" type="integer">`0` for active users (all results here will be `0`).</ResponseField>
+    <ResponseField name="isActive" type="integer">`1` = account is active.</ResponseField>
+    <ResponseField name="createdOn" type="string (ISO 8601)">Account creation timestamp.</ResponseField>
+    <ResponseField name="updatedOn" type="string | null">Last update timestamp, or `null`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+```bash
+curl -X POST https://your-api-host/api/getAllUsers \
+  -H "Authorization: Bearer <authToken>"
+```
+
+### Error Codes
+
+| `returnCode` | Name        | Description                               |
+|--------------|-------------|-------------------------------------------|
+| `0`          | `SUCCESS`   | Users returned in `data` array.           |
+| `10`         | `NOT_FOUND` | No active users exist in the system.      |
+
+---
+
+## POST /api/getSpecificUser
+
+Fetches a single active user by their numeric database ID.
+
+```
+POST /api/getSpecificUser
+```
+
+### Authentication
+
+<Note>
+  **Authentication required.** Include a valid JWT in the `Authorization` header:
+  ```
+  Authorization: Bearer <authToken>
+  ```
+</Note>
+
+### Request Body
+
+<ParamField body="data" type="object" required>
+  The `DataRequest` wrapper object.
+
+  <Expandable title="data fields">
+    <ParamField body="id" type="integer" required>
+      The primary key of the user to fetch. Must be a positive integer corresponding to an active (non-deleted) user.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "User retrieved successfully"
+  },
+  "data": {
+    "id": 42,
+    "roleId": 2,
+    "fullName": "Bob Johnson",
+    "emailId": "bob@example.com",
+    "mobileNumber": "+14155550101",
+    "isDeleted": 0,
+    "isActive": 1,
+    "createdOn": "2024-01-10T08:00:00.000000",
+    "createdBy": null,
+    "updatedOn": null,
+    "updatedBy": null,
+    "deletedOn": null,
+    "deletedBy": null
+  }
+}
+```
+
+<ResponseField name="data" type="UserMasterResponse">
+  The matching user object, or `null` if not found (accompanied by `returnCode: 10`). See field descriptions in the `getAllUsers` section above.
+</ResponseField>
+
+### Example
+
+```bash
+curl -X POST https://your-api-host/api/getSpecificUser \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <authToken>" \
+  -d '{
+    "data": {
+      "id": 42
+    }
+  }'
+```
+
+### Error Codes
+
+| `returnCode` | Name        | Description                                                                         |
+|--------------|-------------|--------------------------------------------------------------------------------------|
+| `0`          | `SUCCESS`   | User found and returned in `data`.                                                  |
+| `10`         | `NOT_FOUND` | No active user with the given ID exists (user doesn't exist or is soft-deleted).    |
+
+---
+
+## POST /api/getCurrentUser
+
+Returns the profile of the user who owns the bearer token attached to the request. The identity is decoded directly from the JWT payload — no request body is needed.
+
+```
+POST /api/getCurrentUser
+```
+
+### Authentication
+
+<Note>
+  **Authentication required.** The caller's identity is derived entirely from the JWT in the `Authorization` header — no body payload is needed.
+  ```
+  Authorization: Bearer <authToken>
+  ```
+</Note>
+
+### Request Body
+
+No request body is required.
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00",
+    "description": "Current user retrieved successfully"
+  },
+  "data": {
+    "id": 42,
+    "full_name": "Alice Smith",
+    "email_id": "alice@example.com"
+  }
+}
+```
+
+<ResponseField name="data" type="UserPublic">
+  A trimmed public view of the authenticated user's profile. Unlike `UserMasterResponse`, this object intentionally omits sensitive or administrative fields.
+
+  <Expandable title="data fields">
+    <ResponseField name="id" type="integer">
+      The authenticated user's primary key.
+    </ResponseField>
+
+    <ResponseField name="full_name" type="string">
+      The user's display name as stored in the database.
+    </ResponseField>
+
+    <ResponseField name="email_id" type="string">
+      The user's registered email address.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+```bash
+curl -X POST https://your-api-host/api/getCurrentUser \
+  -H "Authorization: Bearer <authToken>"
+```
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-01-15T10:30:00.123456",
+    "description": "Current user retrieved successfully"
+  },
+  "data": {
+    "id": 42,
+    "full_name": "Alice Smith",
+    "email_id": "alice@example.com"
+  }
+}
+```
+
+### Error Codes
+
+| `returnCode` | Name        | Description                                                               |
+|--------------|-------------|---------------------------------------------------------------------------|
+| `0`          | `SUCCESS`   | Caller's profile returned in `data`.                                      |
+| `10`         | `NOT_FOUND` | The user referenced by the token no longer exists in the database.        |

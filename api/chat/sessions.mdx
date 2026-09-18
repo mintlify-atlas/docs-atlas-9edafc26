@@ -1,0 +1,417 @@
+---
+title: "Chat session management endpoints"
+sidebarTitle: "Sessions"
+description: "List, retrieve, rename, delete, and share chat sessions. All endpoints require Bearer auth and return the standard APIResponse envelope."
+---
+
+Chat sessions group related messages into a named conversation thread. The endpoints on this page let you fetch a user's full session list, load the messages within a session, rename or soft-delete a session, and share a session with another person via email. All endpoints use `POST` and require a valid Bearer token. Responses are wrapped in the standard `APIResponse` envelope described at the bottom of this page.
+
+---
+
+## APIResponse Envelope
+
+Every endpoint on this page returns a JSON object with the following top-level shape:
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-11-15T10:30:00.000Z",
+    "description": "Human-readable status message"
+  },
+  "data": { }
+}
+```
+
+<ResponseField name="dataResponse.returnCode" type="integer">
+  `0` — SUCCESS. `10` — NOT_FOUND (session does not exist or belongs to another user).
+</ResponseField>
+
+<ResponseField name="dataResponse.responseDateTime" type="string">
+  ISO 8601 timestamp of when the response was generated.
+</ResponseField>
+
+<ResponseField name="dataResponse.description" type="string">
+  A human-readable description of the operation result.
+</ResponseField>
+
+<ResponseField name="data" type="object | array | null">
+  The payload specific to each endpoint. `null` when the operation has no return value (e.g. delete).
+</ResponseField>
+
+---
+
+## POST /api/getAllChatSessions
+
+Returns all non-deleted chat sessions that belong to the authenticated user, sorted by most recently updated first.
+
+**Authentication:** Required — `Authorization: Bearer <token>`
+
+**Request body:** None required.
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8081/api/getAllChatSessions \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-11-15T10:30:00.000Z",
+    "description": "Chat sessions retrieved successfully"
+  },
+  "data": [
+    {
+      "sessionId": 42,
+      "sessionName": "Product Pricing Questions",
+      "createdOn": "2024-11-14 09:15:00",
+      "updatedOn": "2024-11-15 10:28:00"
+    },
+    {
+      "sessionId": 41,
+      "sessionName": "Onboarding Help",
+      "createdOn": "2024-11-13 14:02:00",
+      "updatedOn": "2024-11-13 14:45:00"
+    }
+  ]
+}
+```
+
+<ResponseField name="data[].sessionId" type="integer">
+  Unique identifier for the session. Pass this as `sessionId` in `POST /api/chatConversation` to continue the conversation.
+</ResponseField>
+
+<ResponseField name="data[].sessionName" type="string">
+  Auto-generated 3–4 word name created by the AI from the first message, or the name set via `/api/renameChatSession`.
+</ResponseField>
+
+<ResponseField name="data[].createdOn" type="string">
+  Session creation timestamp formatted as `YYYY-MM-DD HH:MM:SS`.
+</ResponseField>
+
+<ResponseField name="data[].updatedOn" type="string">
+  Timestamp of the most recent message or rename, formatted as `YYYY-MM-DD HH:MM:SS`. The list is sorted by this field, descending.
+</ResponseField>
+
+---
+
+## POST /api/getChatBySessionId
+
+Returns the messages within a specific session, with their role, content, timestamps, and any file attachments. Results are paginated; passing `page: 0` returns the full history in chronological order.
+
+**Authentication:** Required — `Authorization: Bearer <token>`
+
+### Request Body
+
+```json
+{
+  "data": {
+    "sessionId": 42,
+    "tabId": null,
+    "page": 0
+  }
+}
+```
+
+<ParamField body="data.sessionId" type="integer" required>
+  The ID of the session whose messages you want to retrieve.
+</ParamField>
+
+<ParamField body="data.tabId" type="string" optional>
+  Optional browser tab identifier to filter messages to a specific tab context. Pass `null` to retrieve all messages in the session regardless of tab.
+</ParamField>
+
+<ParamField body="data.page" type="integer" optional>
+  Page number for pagination. `0` (default) fetches the complete history in ascending chronological order. Any value `≥ 1` fetches a page of 10 messages counted backward from the most recent.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8081/api/getChatBySessionId \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"sessionId": 42, "tabId": null, "page": 0}}'
+```
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-11-15T10:30:00.000Z",
+    "description": "Chats retrieved successfully"
+  },
+  "data": [
+    {
+      "id": 101,
+      "userId": 7,
+      "role": 1,
+      "message": "What products do you offer?",
+      "createdOn": "2024-11-14 09:15:10",
+      "updatedOn": "2024-11-14 09:15:10",
+      "attachments": []
+    },
+    {
+      "id": 102,
+      "userId": 7,
+      "role": 2,
+      "message": "We offer three product tiers: Starter, Pro, and Enterprise...",
+      "createdOn": "2024-11-14 09:15:12",
+      "updatedOn": "2024-11-14 09:15:12",
+      "attachments": []
+    },
+    {
+      "id": 103,
+      "userId": 7,
+      "role": 1,
+      "message": "Tell me about the Pro plan.",
+      "createdOn": "2024-11-14 09:17:00",
+      "updatedOn": "2024-11-14 09:17:00",
+      "attachments": [
+        {
+          "fileName": "pricing.pdf",
+          "filePath": "static/uploads/pricing.pdf",
+          "fileText": "Pro Plan: $49/month, includes..."
+        }
+      ]
+    }
+  ]
+}
+```
+
+<ResponseField name="data[].id" type="integer">
+  Unique message ID.
+</ResponseField>
+
+<ResponseField name="data[].userId" type="integer">
+  ID of the user who owns this message.
+</ResponseField>
+
+<ResponseField name="data[].role" type="integer">
+  `1` — user message. `2` — assistant (AI) message.
+</ResponseField>
+
+<ResponseField name="data[].message" type="string">
+  The message text. For user messages, this is the raw query (file attachment content is not included here; it is available in the `attachments` array). Newlines are normalised to `\n`.
+</ResponseField>
+
+<ResponseField name="data[].createdOn" type="string">
+  Message creation timestamp, `YYYY-MM-DD HH:MM:SS`.
+</ResponseField>
+
+<ResponseField name="data[].updatedOn" type="string">
+  Message last-updated timestamp, `YYYY-MM-DD HH:MM:SS`.
+</ResponseField>
+
+<ResponseField name="data[].attachments" type="array">
+  List of files attached to this message. Empty array when no file was uploaded with this turn.
+</ResponseField>
+
+<ResponseField name="data[].attachments[].fileName" type="string">
+  Original filename as uploaded (e.g. `report.pdf`).
+</ResponseField>
+
+<ResponseField name="data[].attachments[].filePath" type="string">
+  Server-side storage path for the file.
+</ResponseField>
+
+<ResponseField name="data[].attachments[].fileText" type="string">
+  The full text extracted from the file at upload time.
+</ResponseField>
+
+---
+
+## POST /api/deleteChatSession
+
+Soft-deletes a chat session. The session is marked `is_deleted = 1` in the database and will no longer appear in `getAllChatSessions` or be accessible via `getChatBySessionId`. The underlying messages and attachments are retained for audit purposes.
+
+**Authentication:** Required — `Authorization: Bearer <token>`
+
+### Request Body
+
+```json
+{
+  "data": {
+    "sessionId": 42
+  }
+}
+```
+
+<ParamField body="data.sessionId" type="integer" required>
+  The ID of the session to delete. The session must belong to the authenticated user, otherwise a 404 is returned.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8081/api/deleteChatSession \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"sessionId": 42}}'
+```
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-11-15T10:30:00.000Z",
+    "description": "Chat session soft deleted successfully"
+  },
+  "data": null
+}
+```
+
+<Warning>
+  Deletion is a soft operation — the session record is flagged but not physically removed. However, it becomes inaccessible from all API endpoints once deleted. There is no undo endpoint; contact a database administrator to restore a soft-deleted session.
+</Warning>
+
+### Error Responses
+
+| Status | Detail |
+|--------|--------|
+| `404` | `Chat session not found or not authorized` — the session does not exist or belongs to a different user. |
+
+---
+
+## POST /api/renameChatSession
+
+Updates the display name of a chat session. Session names are auto-generated as a 3–4 word summary of the first message; use this endpoint to give sessions a more meaningful label.
+
+**Authentication:** Required — `Authorization: Bearer <token>`
+
+### Request Body
+
+```json
+{
+  "data": {
+    "sessionId": 42,
+    "sessionName": "Q4 Pricing Discussion"
+  }
+}
+```
+
+<ParamField body="data.sessionId" type="integer" required>
+  The ID of the session to rename.
+</ParamField>
+
+<ParamField body="data.sessionName" type="string" required>
+  The new name for the session. There is no enforced maximum length at the API level, though the auto-generation pipeline caps names at 100 characters.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8081/api/renameChatSession \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"sessionId": 42, "sessionName": "Q4 Pricing Discussion"}}'
+```
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-11-15T10:30:00.000Z",
+    "description": "Chat session renamed successfully"
+  },
+  "data": {
+    "sessionId": 42,
+    "sessionName": "Q4 Pricing Discussion"
+  }
+}
+```
+
+<ResponseField name="data.sessionId" type="integer">
+  The ID of the renamed session.
+</ResponseField>
+
+<ResponseField name="data.sessionName" type="string">
+  The new session name as persisted.
+</ResponseField>
+
+### Error Responses
+
+| Status | Detail |
+|--------|--------|
+| `404` | `Chat session not found or not authorized` — the session does not exist or belongs to a different user. |
+
+---
+
+## POST /api/shareChatSession
+
+Sends an email to a specified recipient containing an HTML-rendered view of the session's chat history and a deep-link URL back to the conversation. The email is sent from the SMTP address configured in the server's environment settings.
+
+**Authentication:** Required — `Authorization: Bearer <token>`
+
+### Request Body
+
+```json
+{
+  "data": {
+    "email": "friend@example.com",
+    "url": "https://app.example.com/chat/42",
+    "sessionId": 42
+  }
+}
+```
+
+<ParamField body="data.email" type="string" required>
+  The recipient's email address. Must be a valid email format (`EmailStr` validation is applied).
+</ParamField>
+
+<ParamField body="data.url" type="string" required>
+  The full URL to the shared session in the client application. This link is embedded in the email so the recipient can navigate directly to the conversation.
+</ParamField>
+
+<ParamField body="data.sessionId" type="integer" required>
+  The ID of the session to share. All non-deleted messages in the session are included in the email rendering.
+</ParamField>
+
+<Note>
+  The `sessionId` field accepts the alias `"sessionId"` in the JSON body (camelCase). The field name `session_id` (snake_case) is also accepted due to Pydantic's `populate_by_name` configuration.
+</Note>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8081/api/shareChatSession \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "email": "friend@example.com",
+      "url": "https://app.example.com/chat/42",
+      "sessionId": 42
+    }
+  }'
+```
+
+### Response
+
+```json
+{
+  "dataResponse": {
+    "returnCode": 0,
+    "responseDateTime": "2024-11-15T10:30:00.000Z",
+    "description": "Email sent successfully"
+  },
+  "data": null
+}
+```
+
+### Error Responses
+
+| Status | Detail |
+|--------|--------|
+| `500` | `Failed to send email` — the SMTP connection failed or the mail server rejected the message. Check server-side SMTP configuration. |

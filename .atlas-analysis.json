@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Voice Agent",
+  "projectType": "api-service",
+  "projectName": "Voice Agent",
+  "projectDescription": "A FastAPI-powered voice agent backend that integrates Bolna.ai for outbound voice calls, Google Gemini for LLM-driven conversations, pgvector for semantic document retrieval, and a full user/RBAC management system.",
   "theme": "luma",
-  "colors": {
-    "primary": "#6C3CE1",
-    "light": "#EDE9FF",
-    "dark": "#3B1FA8"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/vrashmanyu605-eng/Voice_Agent"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/vrashmanyu605-eng/Voice_Agent"
-    }
-  },
+  "primaryColor": "#6C3CE1",
+  "lightColor": "#EDE9FF",
+  "darkColor": "#3B1FA8",
   "navigation": {
     "tabs": [
       {
@@ -96,5 +84,37 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Bolna.ai outbound voice call triggering and webhook tool integration",
+    "Streaming LLM chat using Google Gemini 2.5 Flash via LiteLLM",
+    "Hybrid RAG pipeline with pgvector semantic search across documents, chat history, and attachments",
+    "Multi-format document ingestion (PDF, DOCX, XLSX, CSV, images) with auto-embedding",
+    "JWT-based authentication with role-based access control (RBAC)",
+    "Customisable prompt-template system for persona, safety, and response quality",
+    "Per-user token usage tracking and configurable token limits",
+    "LLM-powered natural language product search for voice agent tools"
+  ],
+  "publicApiSurface": [
+    "POST /api/verifyPassword",
+    "POST /api/userSignUp",
+    "POST /api/addEditUser",
+    "POST /api/getAllUsers",
+    "POST /api/getSpecificUser",
+    "POST /api/deleteUser",
+    "POST /api/forgotPassword",
+    "POST /api/resetPassword",
+    "POST /api/getCurrentUser",
+    "POST /api/chatConversation",
+    "POST /api/getAllChatSessions",
+    "POST /api/getChatBySessionId",
+    "POST /api/deleteChatSession",
+    "POST /api/renameChatSession",
+    "POST /api/shareChatSession",
+    "POST /api/llm_call",
+    "POST /api/upload_documents",
+    "POST /api/bolna/trigger-call",
+    "POST /api/bolna/webhook/tool",
+    "POST /api/products/search"
+  ]
 }
