@@ -85,11 +85,17 @@ The seven templates are loaded in a fixed order. Each is described below with it
     | Quick fact | One or two sentences maximum |
 
     **Banned patterns** — the model is explicitly prohibited from using:
-    - Sycophantic openers ("Certainly!", "Absolutely!", "Great question!")
+    - Sycophantic openers ("Certainly!", "Absolutely!", "Of course!", "Great question!")
     - Restating the question verbatim before answering
     - Closing filler ("I hope this helps!", "Let me know if you need more")
     - Padding with synonyms to appear thorough
     - Unnecessary disclaimer paragraphs
+
+    **Quality checks** — before sending, the template instructs the model to verify:
+    - Does this actually answer what was asked?
+    - Is every claim accurate to the best of my knowledge?
+    - Is this the right length — not too short, not padded?
+    - Does the format match the context?
   </Accordion>
 
   <Accordion title="harm_avoidance.txt — Proportional harm model">

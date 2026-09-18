@@ -1,5 +1,5 @@
 ---
-title: "Role management endpoints for Voice Agent RBAC"
+title: "Role management API endpoints for Voice Agent RBAC"
 sidebarTitle: "Roles"
 description: "Create, update, retrieve, and delete roles in Voice Agent's role-based access control system, including restricted role flags and unique role identifiers."
 ---
@@ -206,7 +206,7 @@ POST /deleteRole
 
 #### Response
 
-Returns an `APIResponse` with `returnCode: 0` and no `data` payload on success.
+Returns an `APIResponse` with `returnCode: 0` and `data: null` on success.
 
 #### Example
 
@@ -383,142 +383,6 @@ role_master
 - **`privileges_master`** — Defines granular privileges (each tied to a `menu_id` in the navigation hierarchy).
 - **`menu_hierarchy`** — Tree of UI menu items. Each node has a `menu_unique_id`, a `parent_id` for nesting, and an `entity_url` that links the menu entry to a backend route.
 
-## Menu hierarchy and privileges (read-only)
-
-The menu hierarchy and privilege records are read-only reference endpoints. Neither requires authentication.
-
-### Get menu hierarchy
-
-Returns the full active navigation tree. No request body required.
-
-```
-POST /getMenuHierarchy
-```
-
-**Authentication:** Not required.
-
-#### Response fields
-
-<ResponseField name="id" type="integer" required>
-  Primary key of the menu item.
-</ResponseField>
-
-<ResponseField name="name" type="string" required>
-  Internal name of the menu node.
-</ResponseField>
-
-<ResponseField name="dispName" type="string" required>
-  Display label shown in the UI.
-</ResponseField>
-
-<ResponseField name="parentId" type="integer | null">
-  Primary key of the parent menu node. Top-level nodes use `0` or `null`.
-</ResponseField>
-
-<ResponseField name="parentUniqueId" type="string | null">
-  Unique string identifier of the parent node, for tree traversal without relying on integer IDs.
-</ResponseField>
-
-<ResponseField name="entityUrl" type="string" required>
-  Backend route path associated with this menu entry.
-</ResponseField>
-
-<ResponseField name="menuIcon" type="string | null">
-  Icon class or path for the menu item.
-</ResponseField>
-
-<ResponseField name="description" type="string | null">
-  Optional description of the menu node.
-</ResponseField>
-
-<ResponseField name="isActive" type="integer" required>
-  `1` if the item is active and should be rendered; `0` if hidden.
-</ResponseField>
-
-<ResponseField name="menuUniqueId" type="string | null">
-  Stable string identifier for programmatic menu lookups.
-</ResponseField>
-
-<ResponseField name="displayOrder" type="integer | null">
-  Sort order among sibling nodes.
-</ResponseField>
-
-#### Example
-
-```bash
-curl -X POST https://api.example.com/getMenuHierarchy
-```
-
----
-
-### Get all privileges
-
-Returns all privilege definitions mapped to menu nodes.
-
-```
-POST /getAllPrivileges
-```
-
-**Authentication:** Not required.
-
-#### Response fields
-
-<ResponseField name="id" type="integer" required>
-  Primary key of the privilege.
-</ResponseField>
-
-<ResponseField name="privilegeUniqueId" type="string" required>
-  Stable machine identifier for the privilege, referenced by `role_privileges_mapping.privilege_id`.
-</ResponseField>
-
-<ResponseField name="name" type="string" required>
-  Human-readable name of the privilege.
-</ResponseField>
-
-<ResponseField name="description" type="string" required>
-  Short description of what the privilege grants.
-</ResponseField>
-
-<ResponseField name="menuId" type="integer" required>
-  Foreign key linking this privilege to a node in `menu_hierarchy`.
-</ResponseField>
-
-<ResponseField name="isDeleted" type="integer" required>
-  Soft-delete flag. `1` means the privilege is inactive.
-</ResponseField>
-
-#### Example
-
-```bash
-curl -X POST https://api.example.com/getAllPrivileges
-```
-
-```json
-{
-  "dataResponse": {
-    "returnCode": 0,
-    "responseDateTime": "2024-01-15T10:45:00",
-    "description": "Privileges retrieved successfully."
-  },
-  "data": [
-    {
-      "id": 1,
-      "privilegeUniqueId": "PRIV_VIEW_DASHBOARD",
-      "name": "View Dashboard",
-      "description": "Access main dashboard",
-      "menuId": 3,
-      "isDeleted": 0,
-      "createdOn": "2024-01-01T00:00:00",
-      "createdBy": 1,
-      "updatedOn": "2024-01-01T00:00:00",
-      "updatedBy": 1,
-      "deletedOn": null,
-      "deletedBy": null
-    }
-  ]
-}
-```
-
 <Tip>
-  To build a role permissions editor in your UI, first call `getAllPrivileges` to load all available privileges, then call `getRoleList` to load existing roles. Display the privileges grouped by their `menuId` node from `getMenuHierarchy` for a tree-structured permission picker.
+  To build a role permissions editor in your UI, first call `getAllPrivileges` to load all available privileges, then call `getRoleList` to load existing roles. Display the privileges grouped by their `menuId` node from `getMenuHierarchy` for a tree-structured permission picker. Both `getMenuHierarchy` and `getAllPrivileges` are documented in the Menu Hierarchy reference.
 </Tip>

@@ -103,9 +103,26 @@ async def search_documents(
     ORDER BY ca.embedding <=> CAST(:embedding AS vector)
     LIMIT :limit
     ```
+
+    The `chats` query returns conversation messages directly. Note that `title` is `NULL` for chat rows — only the `text` (message content) is used for retrieval:
+
+    ```sql
+    SELECT
+        'chats' AS source,
+        id,
+        NULL    AS title,
+        message AS text,
+        embedding <=> CAST(:embedding AS vector) AS distance
+    FROM chats
+    WHERE user_id    = :user_id
+      AND session_id = :session_id
+      AND is_deleted = 0
+    ORDER BY embedding <=> CAST(:embedding AS vector)
+    LIMIT :limit
+    ```
   </Step>
   <Step title="Merge all results">
-    Rows from all three sources are collected into a single Python list. Each row is a dict with keys `source`, `id`, `title`, `text`, and `distance`.
+    Rows from all three sources are collected into a single Python list. Each row is a dict with keys `source`, `id`, `title`, `text`, and `distance`. For rows from the `chats` table, `title` is `None`.
   </Step>
   <Step title="Global rerank by distance">
     The merged list is sorted ascending by `distance` (lowest cosine distance = most similar). This promotes the globally most-relevant passages regardless of which source they came from.
@@ -148,15 +165,21 @@ async def resolve_query_with_history(
     recent_chats = ...
 
     prompt = f"""
+        You are a query resolver assistant.
+
         CONVERSATION HISTORY (last few messages):
         {history_block}
 
-        NEW MESSAGE: "{user_query}"
+        NEW MESSAGE:
+        "{user_query}"
 
         TASK:
-        - If the new message is a follow-up, rewrite it as a fully self-contained question.
-        - If it is independent, return it exactly as-is.
-        - Return ONLY the resolved question.
+        - If the new message is a follow-up (e.g., "explain that again"), rewrite it as a
+          fully self-contained question using context from the history.
+        - If the new message is a completely new, independent question, return it exactly as-is.
+        - Return ONLY the resolved question. No explanation, no preamble.
+
+        RESOLVED QUESTION:
     """
     # Calls gemini-2.5-flash; token usage is accumulated into token_usage dict
 ```

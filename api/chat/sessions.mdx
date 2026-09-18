@@ -1,5 +1,5 @@
 ---
-title: "Chat session management endpoints"
+title: "Chat session management — list, rename, delete, share"
 sidebarTitle: "Sessions"
 description: "List, retrieve, rename, delete, and share chat sessions. All endpoints require Bearer auth and return the standard APIResponse envelope."
 ---
@@ -102,7 +102,7 @@ curl -X POST http://localhost:8081/api/getAllChatSessions \
 
 ## POST /api/getChatBySessionId
 
-Returns the messages within a specific session, with their role, content, timestamps, and any file attachments. Results are paginated; passing `page: 0` returns the full history in chronological order.
+Returns the messages within a specific session, with their role, content, timestamps, and any file attachments. Pass `pageSize: 0` to receive the full message history in chronological order. Pass `pageSize: 1` or higher to paginate backward from the most recent messages (10 messages per page).
 
 **Authentication:** Required — `Authorization: Bearer <token>`
 
@@ -113,7 +113,7 @@ Returns the messages within a specific session, with their role, content, timest
   "data": {
     "sessionId": 42,
     "tabId": null,
-    "page": 0
+    "pageSize": 0
   }
 }
 ```
@@ -126,8 +126,8 @@ Returns the messages within a specific session, with their role, content, timest
   Optional browser tab identifier to filter messages to a specific tab context. Pass `null` to retrieve all messages in the session regardless of tab.
 </ParamField>
 
-<ParamField body="data.page" type="integer" optional>
-  Page number for pagination. `0` (default) fetches the complete history in ascending chronological order. Any value `≥ 1` fetches a page of 10 messages counted backward from the most recent.
+<ParamField body="data.pageSize" type="integer" optional>
+  Pagination control. `0` fetches the complete history in ascending chronological order. Any value `≥ 1` fetches a page of 10 messages counted backward from the most recent (page 1 = newest 10, page 2 = next 10, and so on). Defaults to `1`.
 </ParamField>
 
 ### Example Request
@@ -136,7 +136,7 @@ Returns the messages within a specific session, with their role, content, timest
 curl -X POST http://localhost:8081/api/getChatBySessionId \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"data": {"sessionId": 42, "tabId": null, "page": 0}}'
+  -d '{"data": {"sessionId": 42, "tabId": null, "pageSize": 0}}'
 ```
 
 ### Response
@@ -375,12 +375,8 @@ Sends an email to a specified recipient containing an HTML-rendered view of the 
 </ParamField>
 
 <ParamField body="data.sessionId" type="integer" required>
-  The ID of the session to share. All non-deleted messages in the session are included in the email rendering.
+  The ID of the session to share. All non-deleted messages in the session are included in the email rendering. The field also accepts the snake_case alias `session_id` due to Pydantic's `populate_by_name` configuration.
 </ParamField>
-
-<Note>
-  The `sessionId` field accepts the alias `"sessionId"` in the JSON body (camelCase). The field name `session_id` (snake_case) is also accepted due to Pydantic's `populate_by_name` configuration.
-</Note>
 
 ### Example Request
 

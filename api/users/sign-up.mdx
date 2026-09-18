@@ -1,12 +1,12 @@
 ---
 title: "POST /api/userSignUp — register a new user account"
 sidebarTitle: "Sign Up"
-description: "Creates a new Voice Agent user account with the CUSTOM_STUDENT role and returns the full user profile on success."
+description: "Creates a new Voice Agent user account, assigns the CUSTOM_STUDENT role automatically, and returns the full user profile on success."
 ---
 
-The `userSignUp` endpoint allows new users to self-register in Voice Agent. Provide a full name, email address, password, and mobile number; the server will create the account, assign the `CUSTOM_STUDENT` role automatically, and return the newly created user profile. If an account with the same email already exists (active or soft-deleted), the request will be rejected — each email address must be unique across all non-deleted accounts.
+The `userSignUp` endpoint allows new users to self-register in Voice Agent. Provide a full name, email address, password, and mobile number; the server will create the account, assign the `CUSTOM_STUDENT` role automatically, and return the newly created user profile. If an active account with the same email already exists, the request is rejected with HTTP `409 Conflict` — each email address must be unique among active (non-deleted) accounts.
 
-```
+```http
 POST /api/userSignUp
 ```
 
@@ -187,7 +187,8 @@ curl -X POST https://your-api-host/api/userSignUp \
 
 ## Error Codes
 
-| `returnCode` | Name          | Description                                                                               |
-|--------------|---------------|-------------------------------------------------------------------------------------------|
-| `0`          | `SUCCESS`     | Account created; full user profile returned in `data`.                                    |
-| `16`         | `BAD_REQUEST` | Request body was malformed, a required field was missing, or the email already exists.    |
+| `returnCode` / HTTP status | Name          | Description                                                                                   |
+|----------------------------|---------------|-----------------------------------------------------------------------------------------------|
+| `0` / `200`                | `SUCCESS`     | Account created; full user profile returned in `data`.                                        |
+| `409 Conflict` (HTTP)      | —             | An active account with the provided email already exists. No `APIResponse` body is returned.  |
+| `404 Not Found` (HTTP)     | —             | The `CUSTOM_STUDENT` role is not configured in the database.                                  |

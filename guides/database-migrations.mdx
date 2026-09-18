@@ -4,17 +4,11 @@ sidebarTitle: "DB Migrations"
 description: "Run, create, and roll back Voice Agent database schema migrations using Alembic and the project Makefile shortcuts for common migration tasks."
 ---
 
-Voice Agent uses [Alembic](https://alembic.sqlalchemy.org/) to version-control the PostgreSQL schema. Every table — including `document_master` with its pgvector `Vector(3072)` column, `chat_attachments`, and the RBAC tables — is managed through migration scripts stored in `alembic/versions/`. A thin Makefile wraps the most common Alembic commands so you rarely need to type the full `alembic` CLI invocations by hand.
+Voice Agent uses [Alembic](https://alembic.sqlalchemy.org/) to version-control the database schema. Every table — including `document_master` with its pgvector `Vector(3072)` column, `chat_attachments`, and the RBAC tables — is managed through migration scripts stored in `alembic/versions/`. A thin Makefile wraps the most common Alembic commands so you rarely need to type the full `alembic` CLI invocations by hand.
 
 ## Prerequisites
 
-Before running any migration you need a running PostgreSQL instance with the **pgvector** extension enabled in the target database:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-pgvector must be present before `make upgrade` is run because the initial migration creates `Vector(3072)` columns in both `document_master` and `chat_attachments`. You also need the following environment variables set in your `.env` file (read by `alembic/env.py` via `app.core.config.settings`):
+Before running any migration you need a running database instance accessible with the credentials below. You also need the following environment variables set in your `.env` file (read by `alembic/env.py` via `app.core.config.settings`):
 
 | Variable | Description |
 |---|---|
@@ -25,7 +19,7 @@ pgvector must be present before `make upgrade` is run because the initial migrat
 | `MYSQL_DB_NAME` | Database name |
 
 <Note>
-  `alembic/env.py` constructs a `postgresql+asyncpg` async URL from these settings at runtime, overriding the placeholder URL in `alembic.ini`. The async engine uses `pool_pre_ping=True` to recover gracefully from stale connections.
+  `alembic/env.py` constructs a `mysql+asyncmy` async URL from these settings at runtime, overriding the placeholder URL in `alembic.ini`. The async engine uses `pool_pre_ping=True` to recover gracefully from stale connections.
 </Note>
 
 ## Available commands
@@ -47,7 +41,7 @@ Follow these steps on a fresh environment to initialise the database schema:
 
 <Steps>
   <Step title="Set database connection variables">
-    Create or update your `.env` file in the project root with the five PostgreSQL variables listed above. Alembic reads them through `app.core.config.settings` when `env.py` is loaded.
+    Create or update your `.env` file in the project root with the five database connection variables listed above. Alembic reads them through `app.core.config.settings` when `env.py` is loaded.
   </Step>
   <Step title="Apply all migrations">
     Run the upgrade command from the project root:
@@ -66,7 +60,7 @@ Follow these steps on a fresh environment to initialise the database schema:
     Connect to your database and list the tables:
 
     ```bash
-    psql -U <user> -d <database> -c "\dt"
+    mysql -u <user> -p -e "SHOW TABLES;" <database>
     ```
 
     You should see tables including `document_master`, `chat_attachments`, `user_master`, `role_master`, and others defined in `app/models/`.

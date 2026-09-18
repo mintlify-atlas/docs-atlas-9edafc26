@@ -1,12 +1,12 @@
 ---
-title: "POST /api/addEditUser — create or update a user"
-sidebarTitle: "Add / Edit User"
-description: "Creates a new managed user account or updates an existing one. Pass id=0 to create; pass a real user ID to update fields and optionally change the password."
+title: "POST /api/addEditUser — create or update a user record"
+sidebarTitle: "Add/Edit User"
+description: "Creates a new managed user account or updates an existing one. Pass id=0 to create; pass a real user ID to update fields or change the password."
 ---
 
 The `addEditUser` endpoint provides a single surface for administrative user management. The behavior is controlled entirely by the `id` field in the request: send `id: 0` to create a brand-new user — the server will auto-generate a random password and email it to the new account — or send a real user ID to update that user's profile fields. This endpoint requires a valid bearer token and is intended for administrators or privileged users, not for end-user self-service (see [Sign Up](/api/users/sign-up) for that flow).
 
-```
+```http
 POST /api/addEditUser
 ```
 
@@ -14,7 +14,7 @@ POST /api/addEditUser
 
 <Note>
   **Authentication required.** Include a valid JWT in the `Authorization` header:
-  ```
+  ```http
   Authorization: Bearer <authToken>
   ```
   Requests without a valid token receive a `401 Unauthorized` HTTP error.
@@ -135,12 +135,24 @@ POST /api/addEditUser
       Timestamp when the record was first created.
     </ResponseField>
 
+    <ResponseField name="createdBy" type="integer | null">
+      ID of the user who created this record.
+    </ResponseField>
+
     <ResponseField name="updatedOn" type="string | null">
       Timestamp of the most recent update. `null` if never updated.
     </ResponseField>
 
     <ResponseField name="updatedBy" type="integer | null">
       ID of the user who last modified this record.
+    </ResponseField>
+
+    <ResponseField name="deletedOn" type="string | null">
+      Timestamp of soft-deletion. `null` for active records.
+    </ResponseField>
+
+    <ResponseField name="deletedBy" type="integer | null">
+      ID of the user who soft-deleted this record. `null` for active records.
     </ResponseField>
   </Expandable>
 </ResponseField>

@@ -1,7 +1,7 @@
 ---
-title: "Configure Voice Agent environment variables"
+title: "Voice Agent Environment Variable Configuration Reference"
 sidebarTitle: "Configuration"
-description: "Complete reference for every environment variable Voice Agent reads at startup, with defaults, types, and guidance on which values are required for each feature."
+description: "Full reference for every Voice Agent environment variable — PostgreSQL, MySQL, Google API, Bolna, SMTP, and JWT — with defaults and required flags."
 ---
 
 Voice Agent loads all runtime configuration from a `.env` file in the project root (or from the process environment) using `python-dotenv`. The `Settings` class in `app/core/config.py` reads each variable with `os.getenv`, falling back to a safe default where one is defined. Variables without a default must be set explicitly before starting the server — omitting them will cause the related feature to fail or the application to refuse to start.
@@ -50,6 +50,34 @@ Voice Agent loads all runtime configuration from a `.env` file in the project ro
   Number of seconds after which SQLAlchemy recycles idle connections in the pool. The default of `1800` (30 minutes) prevents stale connection errors on databases that aggressively terminate idle sessions.
 </ParamField>
 
+## MySQL database (legacy connection)
+
+Voice Agent's `Settings` class in `app/core/config.py` defines a second database connection for MySQL. The `app/db/database.py` file constructs both a MySQL and a PostgreSQL engine at startup, though the active `get_db` dependency currently uses only the PostgreSQL engine. These variables must be set if any service is reconfigured to use the MySQL connection.
+
+<ParamField path="MYSQL_DB_HOST" type="string" default="localhost">
+  Hostname or IP address of the MySQL server.
+</ParamField>
+
+<ParamField path="MYSQL_DB_PORT" type="string" default="3306">
+  Port the MySQL server listens on. `3306` is the standard MySQL port.
+</ParamField>
+
+<ParamField path="MYSQL_DB_USER" type="string" default="root">
+  MySQL username used to connect.
+</ParamField>
+
+<ParamField path="MYSQL_DB_PASSWORD" type="string" default="">
+  Password for `MYSQL_DB_USER`. Defaults to an empty string in the source code.
+</ParamField>
+
+<ParamField path="MYSQL_DB_NAME" type="string" default="fastapi_db">
+  Name of the MySQL database to connect to.
+</ParamField>
+
+<ParamField path="MYSQL_DB_POOL_RECYCLE" type="integer" default="1800">
+  Number of seconds after which SQLAlchemy recycles idle MySQL connections. Mirrors the behaviour of `PG_DB_POOL_RECYCLE` for the MySQL engine.
+</ParamField>
+
 ## LLM and embeddings
 
 <ParamField path="GOOGLE_API_KEY" type="string" required>
@@ -67,7 +95,7 @@ Voice Agent loads all runtime configuration from a `.env` file in the project ro
 ## Voice calls (Bolna.ai)
 
 <ParamField path="BOLNA_API_KEY" type="string" required="for voice calls">
-  Bearer token used to authenticate requests to `https://api.bolna.ai/call`. Obtain it from the Bolna dashboard under **Settings → API Keys**. If this variable is unset, calls to the `/api/bolna` endpoints will return `{"status": "error", "message": "BOLNA_API_KEY is not configured"}` without attempting the outbound call.
+  Bearer token used to authenticate requests to `https://api.bolna.ai/call`. Obtain it from the Bolna dashboard under **Settings → API Keys**. If this variable is unset, calls to `POST /api/bolna/trigger-call` will return `{"status": "error", "message": "BOLNA_API_KEY is not configured"}` without attempting the outbound call.
 </ParamField>
 
 ## Email (SMTP)
@@ -80,16 +108,16 @@ Voice Agent loads all runtime configuration from a `.env` file in the project ro
   SMTP port. `465` is the standard port for SMTPS (implicit TLS). Use `587` if your provider requires STARTTLS instead.
 </ParamField>
 
-<ParamField path="SMTP_USERNAME" type="string">
-  SMTP authentication username (usually the sender email address). No default — leave unset to skip SMTP authentication.
+<ParamField path="SMTP_USERNAME" type="string" default="developerwebanix@gmail.com">
+  SMTP authentication username (usually the sender email address). The source code ships with a placeholder default — always override this with your own address before deploying.
 </ParamField>
 
 <ParamField path="SMTP_PASSWORD" type="string">
-  SMTP authentication password or app-specific password. For Gmail, generate a 16-character app password under **Google Account → Security → App passwords**.
+  SMTP authentication password or app-specific password. For Gmail, generate a 16-character app password under **Google Account → Security → App passwords**. The source code contains a placeholder default that must be replaced — never leave it in place in any shared or production environment.
 </ParamField>
 
-<ParamField path="SMTP_FROM_EMAIL" type="string">
-  The `From:` address that appears on outgoing emails. Must be a valid address accepted by your SMTP provider.
+<ParamField path="SMTP_FROM_EMAIL" type="string" default="developerwebanix@gmail.com">
+  The `From:` address that appears on outgoing emails. Defaults to the same placeholder as `SMTP_USERNAME`. Must be a valid address accepted by your SMTP provider.
 </ParamField>
 
 ---
@@ -128,6 +156,14 @@ PG_DB_USER=voice_agent
 PG_DB_PASSWORD=super-secret-db-password
 PG_DB_NAME=voice_agent_prod
 PG_DB_POOL_RECYCLE=1800
+
+# ── MySQL (legacy connection — set if the MySQL engine is used) ──
+MYSQL_DB_HOST=mysql.internal.example.com
+MYSQL_DB_PORT=3306
+MYSQL_DB_USER=voice_agent_mysql
+MYSQL_DB_PASSWORD=mysql-secret-password
+MYSQL_DB_NAME=voice_agent_mysql_db
+MYSQL_DB_POOL_RECYCLE=1800
 
 # ── LLM & embeddings ────────────────────────────────────────────
 GOOGLE_API_KEY=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ1234567

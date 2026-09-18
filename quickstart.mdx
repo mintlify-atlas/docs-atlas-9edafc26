@@ -1,7 +1,7 @@
 ---
-title: "Get started with Voice Agent in 5 minutes"
+title: "Voice Agent Quickstart: Run the Server in 5 Minutes"
 sidebarTitle: "Quickstart"
-description: "Clone Voice Agent, configure your environment variables, apply database migrations, and make your first authenticated API request — all in under five minutes."
+description: "Install Voice Agent, apply Alembic migrations, start the server on port 8081, and make your first authenticated request — all in under five minutes."
 ---
 
 Voice Agent is a self-hosted FastAPI service. Getting it running locally requires a PostgreSQL database with the `pgvector` extension, a Google API key for Gemini embeddings and chat, and optionally a Bolna API key if you want to trigger outbound voice calls. All other dependencies are installed from `requirements.txt`. The server listens on port `8081` by default.
@@ -72,7 +72,7 @@ Before you begin, make sure you have the following available:
 
     Uvicorn will start with hot-reload enabled and bind to all interfaces on port `8081`. You should see output similar to:
 
-    ```
+    ```text
     INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
     INFO:     Started reloader process [...]
     INFO:     Started server process [...]
@@ -97,7 +97,7 @@ Before you begin, make sure you have the following available:
   <Step title="Explore the interactive API docs">
     FastAPI generates an interactive Swagger UI automatically. Open the following URL in your browser to browse all available endpoints, inspect request/response schemas, and send test requests directly from the UI:
 
-    ```
+    ```text
     http://localhost:8081/docs
     ```
 

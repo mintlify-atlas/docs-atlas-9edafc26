@@ -13,7 +13,7 @@ Voice Agent accepts the following formats at the `POST /api/upload_documents` en
 | Extension | Type | Notes |
 |-----------|------|-------|
 | `.pdf` | PDF | Text extracted page by page using PyMuPDF and pdfplumber; Gemini 2.5 Flash vision is used as a fallback for scanned or image-heavy pages |
-| `.docx`, `.doc` | Word Document | Paragraph text extracted directly via python-docx; `.doc` files are first converted to PDF via LibreOffice |
+| `.docx`, `.doc` | Word Document | Paragraph text extracted directly via python-docx (`DocxDocument`) |
 | `.xlsx`, `.xls` | Excel Spreadsheet | All sheets extracted as pipe-delimited rows; `.xls` files are converted to `.xlsx` before processing |
 | `.csv` | CSV | Rows extracted as plain text using pandas |
 | `.jpg`, `.jpeg`, `.png` | Image | Full-page OCR and description via Gemini 2.5 Flash vision |
@@ -30,7 +30,7 @@ Voice Agent accepts the following formats at the `POST /api/upload_documents` en
   <Step title="Text is extracted based on file type">
     The extraction pipeline dispatches each file to the appropriate extractor:
     - **PDF** — up to 5 pages processed concurrently; PyMuPDF is tried first, pdfplumber as a fallback, and Gemini 2.5 Flash vision if both produce garbage output.
-    - **Word** — paragraphs joined with newlines.
+    - **Word** — paragraphs extracted via python-docx and joined with newlines.
     - **Excel / CSV** — rows formatted as pipe-delimited text, one sheet section per worksheet.
     - **Image** — sent directly to the Gemini 2.5 Flash vision model.
   </Step>

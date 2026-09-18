@@ -57,11 +57,9 @@ data: Here is the first part of the answer
 
 data:  and here is the next chunk
 
-data: [DONE]
-
 ```
 
-Each line follows the standard SSE format: `data: <chunk>\n\n`.
+Each line follows the standard SSE format: `data: <chunk>\n\n`. The stream ends when the server closes the connection after the final chunk — there is no terminal `[DONE]` event.
 
 ### Response Headers
 

@@ -1,5 +1,5 @@
 ---
-title: "Configuration group and parameter management API"
+title: "Configuration group and parameter management API reference"
 sidebarTitle: "Config"
 description: "Manage runtime configuration via a two-level key-value store — group config parameters into named groups and read or update values without redeployment."
 ---
@@ -54,7 +54,7 @@ config_group
 A `ConfigGroup` is a logical container — think of it as a configuration namespace. Each `ConfigParam` inside it is an individual setting entry. The `paramUniqueId` embeds the parent group name, making it self-documenting (e.g. `LLM_SETTINGS_MODEL_NAME`). Both unique IDs are generated automatically at creation time and cannot be set by the caller.
 
 <Tip>
-  Use `groupUniqueId` and `paramUniqueId` as stable identifiers in your application code. Because they are derived from names, changing a name via the edit endpoint does **not** update the unique ID — store the ID returned at creation time.
+  Use `groupUniqueId` and `paramUniqueId` as stable identifiers in your application code. Because they are derived from names at creation time, renaming a group or parameter via the edit endpoint does **not** update the unique ID — store the ID returned at creation time.
 </Tip>
 
 ---
@@ -163,7 +163,7 @@ A `ConfigGroup` is a logical container — think of it as a configuration namesp
 
 ### Add or edit a config group
 
-Creates a new config group (`id: 0`) or updates an existing one (pass the numeric `id`). On creation, `groupUniqueId` is automatically generated as `GROUP_<NAME_UPPERCASED>` and cannot be overridden.
+Creates a new config group (`id: 0`) or updates an existing one (pass the numeric `id`). On creation, `groupUniqueId` is automatically generated as `GROUP_<NAME_UPPERCASED>` and is read-only from that point on — it cannot be changed via this endpoint.
 
 ```
 POST /addEditConfigGroup
@@ -183,14 +183,6 @@ POST /addEditConfigGroup
 
 <ParamField body="description" type="string" required>
   Description of what this group of parameters configures.
-</ParamField>
-
-<ParamField body="groupUniqueId" type="string">
-  Optional. Ignored on create (auto-generated). May be supplied on update but the service does not persist changes to this field — `groupUniqueId` is set once at creation.
-</ParamField>
-
-<ParamField body="isDeleted" type="integer" default="0">
-  Soft-delete flag. Defaults to `0`.
 </ParamField>
 
 #### Response
@@ -389,7 +381,7 @@ curl -X POST https://api.example.com/getSpecificConfigGroup \
 
 ### Delete a config group
 
-Soft-deletes a config group by its numeric primary key. The `data` field of the request envelope accepts an integer directly (not a nested object).
+Soft-deletes a config group by its numeric primary key. The `data` field of the request envelope accepts an integer directly — not a nested object.
 
 ```
 POST /deleteConfigGroup
@@ -399,8 +391,10 @@ POST /deleteConfigGroup
 
 #### Request body
 
+The `data` value is a bare integer, not a nested object: `{"data": 3}`.
+
 <ParamField body="data" type="integer" required>
-  The integer primary key of the config group to delete. Unlike other endpoints, the `data` value is a bare integer, not an object: `{"data": 3}`.
+  The integer primary key of the config group to delete.
 </ParamField>
 
 #### Response
@@ -476,11 +470,7 @@ POST /addEditConfigParam
 </ParamField>
 
 <ParamField body="paramUniqueId" type="string">
-  Optional on create (auto-generated). On update, if provided, the service will persist this value — use with care since `paramUniqueId` is intended to be a stable identifier.
-</ParamField>
-
-<ParamField body="isDeleted" type="integer" default="0">
-  Soft-delete flag. Defaults to `0`.
+  Optional on create (auto-generated). On update, if provided, the service persists this value — use with care since `paramUniqueId` is intended to be a stable identifier set at creation time.
 </ParamField>
 
 #### Response
@@ -636,8 +626,10 @@ POST /getSpecificConfigParam
 
 #### Request body
 
+The `data` value is a bare integer: `{"data": 7}`.
+
 <ParamField body="data" type="integer" required>
-  The integer primary key of the config parameter to retrieve. Pass as a bare integer in the envelope: `{"data": 7}`.
+  The integer primary key of the config parameter to retrieve.
 </ParamField>
 
 #### Response
@@ -691,8 +683,10 @@ POST /deleteConfigParam
 
 #### Request body
 
+The `data` value is a bare integer: `{"data": 7}`.
+
 <ParamField body="data" type="integer" required>
-  The integer primary key of the config parameter to delete. Pass as a bare integer: `{"data": 7}`.
+  The integer primary key of the config parameter to delete.
 </ParamField>
 
 #### Response

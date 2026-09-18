@@ -1,7 +1,7 @@
 ---
-title: "Voice Agent: FastAPI Backend for AI Voice & Chat"
+title: "Voice Agent: FastAPI for Voice Calls, Chat, and Search"
 sidebarTitle: "Introduction"
-description: "Voice Agent is a FastAPI backend that powers outbound voice calls via Bolna.ai, streaming LLM chat with Gemini 2.5 Flash, semantic document search with pgvector, and RBAC user management."
+description: "FastAPI backend for outbound Bolna.ai voice calls, streaming Gemini 2.5 Flash LLM chat, pgvector semantic document search, and RBAC user management."
 ---
 
 Voice Agent is a production-ready FastAPI application that brings together four distinct AI-powered capabilities under a single async Python backend: outbound telephony through Bolna.ai, server-sent streaming chat responses from Google Gemini 2.5 Flash (routed via LiteLLM), retrieval-augmented generation (RAG) using pgvector cosine-similarity search, and a full role-based access control (RBAC) system for managing users, roles, and menu permissions. All data is persisted in PostgreSQL, database migrations are handled by Alembic, and the entire HTTP layer is built on FastAPI with SQLAlchemy 2 async sessions.
@@ -27,13 +27,13 @@ Voice Agent exposes four core feature areas, each backed by its own router and s
 
 <CardGroup cols={2}>
   <Card title="Outbound Voice Calls" icon="phone">
-    Trigger AI-driven outbound calls to any phone number by passing a Bolna agent ID and recipient number to the `/api/bolna` endpoints. The Bolna.ai platform handles telephony, TTS, and call lifecycle.
+    Trigger AI-driven outbound calls to any phone number by passing a Bolna agent ID and recipient number to `POST /api/bolna/trigger-call`. The Bolna.ai platform handles telephony, TTS, and call lifecycle.
   </Card>
   <Card title="Streaming AI Chat" icon="messages">
-    Send a prompt to `/api/llm` or `/api/ai-chats` and receive a real-time token stream powered by `gemini/gemini-2.5-flash` via LiteLLM. Seven modular prompt templates (persona, security, harm avoidance, and more) are composed into the system instruction on every call.
+    Send a prompt to `POST /api/llm_call` or `POST /api/chatConversation` and receive a real-time token stream powered by `gemini/gemini-2.5-flash` via LiteLLM. Seven modular prompt templates (persona, security, harm avoidance, and more) are composed into the system instruction on every call.
   </Card>
   <Card title="RAG Document Search" icon="magnifying-glass">
-    Upload documents through the `/api/docs` endpoints. Their text is embedded and stored in the `document_master` table with a `pgvector` column. Queries perform cosine-similarity search across documents, chat attachments, and conversation history, then rerank results before passing them to the LLM as context.
+    Upload documents through `POST /api/upload_documents`. Their text is embedded and stored in the `document_master` table with a `pgvector` column. Queries perform cosine-similarity search across documents, chat attachments, and conversation history, then rerank results before passing them to the LLM as context.
   </Card>
   <Card title="RBAC User Management" icon="users">
     Create users, assign roles, and control access to every menu item through the `/api` user and role endpoints. Tokens are JWT-based, and an `AuthMiddleware` layer enforces authentication on all protected routes before requests reach any router.
@@ -45,15 +45,15 @@ Voice Agent exposes four core feature areas, each backed by its own router and s
 Voice Agent is built entirely on Python async primitives and integrates the following libraries and services:
 
 - **Python 3.10+** — minimum required runtime
-- **FastAPI 0.124** — async HTTP framework with automatic OpenAPI generation
-- **SQLAlchemy 2 + asyncpg** — async ORM sessions and connection pooling for PostgreSQL
+- **FastAPI 0.124.4** — async HTTP framework with automatic OpenAPI generation
+- **SQLAlchemy 2.0.41 + asyncpg** — async ORM sessions and connection pooling for PostgreSQL
 - **PostgreSQL 15+ with pgvector** — relational storage and vector similarity search
 - **Alembic** — schema migrations managed via `Makefile` targets (`make migrate`, `make upgrade`)
-- **LiteLLM 1.83** — unified async LLM gateway; routes requests to `gemini/gemini-2.5-flash`
+- **LiteLLM 1.83.14** — unified async LLM gateway; routes requests to `gemini/gemini-2.5-flash`
 - **Google Generative AI / google-genai** — embedding generation for semantic search
 - **Bolna.ai** — outbound telephony API called over HTTPS from `BolnaService`
-- **python-jose + passlib** — JWT creation, signing, and password hashing
-- **uvicorn** — ASGI server started via `startup.py` on port `8081`
+- **python-jose** — JWT creation and signing; **passlib[bcrypt]** — password hashing (used in `app/core/security.py`)
+- **uvicorn 0.38.0** — ASGI server started via `startup.py` on port `8081`
 
 ## Project layout
 

@@ -100,6 +100,7 @@ The following tables make up the core schema:
 | `id` | `BigInteger` PK | Auto-increment role identifier |
 | `role_unique_id` | `String(255)` | Stable string identifier for the role |
 | `name` | `String(100)` | Human-readable role name (unique) |
+| `description` | `String(10)` | Short description of the role |
 | `is_restricted` | `Integer` | `1` = restricted access, `0` = unrestricted |
 
 ### `chat_sessions`
@@ -150,8 +151,9 @@ The following tables make up the core schema:
 | `user_id` / `session_id` / `chat_id` | `Integer` | Context references |
 | `input_tokens` | `Integer` | Prompt token count |
 | `output_tokens` | `Integer` | Completion token count |
-| `resasoning_tokens` | `Integer` | Reasoning token count (Gemini thinking budget) |
+| `resasoning_tokens` | `Integer` | Reasoning token count (note: column name contains a typo in the DB schema) |
 | `total_tokens` | `Integer` | Sum of all token types |
+| `token_used` | `Integer` | Alias for `total_tokens`; tracked separately for budget enforcement queries |
 | `cost` | `DECIMAL(10,4)` | Computed cost in USD |
 | `total_time` | `DECIMAL(10,4)` | Wall-clock seconds for the full request |
 

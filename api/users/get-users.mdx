@@ -1,5 +1,5 @@
 ---
-title: "GET Users — getAllUsers, getSpecificUser, getCurrentUser"
+title: "POST — getAllUsers, getSpecificUser, getCurrentUser"
 sidebarTitle: "Get Users"
 description: "Three authenticated endpoints to list all active users, look up a single user by ID, or retrieve the profile of the currently authenticated caller."
 ---
@@ -12,7 +12,7 @@ Voice Agent exposes three read endpoints for user data. `getAllUsers` returns ev
 
 Retrieves a list of all users whose `is_deleted` flag is `0` (i.e. not soft-deleted). Returns an empty-result code when no active users exist.
 
-```
+```http
 POST /api/getAllUsers
 ```
 
@@ -20,18 +20,14 @@ POST /api/getAllUsers
 
 <Note>
   **Authentication required.** Include a valid JWT in the `Authorization` header:
-  ```
+  ```http
   Authorization: Bearer <authToken>
   ```
 </Note>
 
 ### Request Body
 
-No request body payload is needed. You may send an empty JSON object or omit the body entirely:
-
-```json
-{}
-```
+This endpoint takes no request body. Send the request without a body or with an empty body — only the `Authorization` header is required.
 
 ### Response
 
@@ -69,7 +65,11 @@ No request body payload is needed. You may send an empty JSON object or omit the
     <ResponseField name="isDeleted" type="integer">`0` for active users (all results here will be `0`).</ResponseField>
     <ResponseField name="isActive" type="integer">`1` = account is active.</ResponseField>
     <ResponseField name="createdOn" type="string (ISO 8601)">Account creation timestamp.</ResponseField>
+    <ResponseField name="createdBy" type="integer | null">ID of the user who created this account, or `null`.</ResponseField>
     <ResponseField name="updatedOn" type="string | null">Last update timestamp, or `null`.</ResponseField>
+    <ResponseField name="updatedBy" type="integer | null">ID of the user who last updated this record, or `null`.</ResponseField>
+    <ResponseField name="deletedOn" type="string | null">Deletion timestamp. Always `null` for active users returned by this endpoint.</ResponseField>
+    <ResponseField name="deletedBy" type="integer | null">ID of the user who deleted this record. Always `null` for active users returned by this endpoint.</ResponseField>
   </Expandable>
 </ResponseField>
 
@@ -93,7 +93,7 @@ curl -X POST https://your-api-host/api/getAllUsers \
 
 Fetches a single active user by their numeric database ID.
 
-```
+```http
 POST /api/getSpecificUser
 ```
 
@@ -101,7 +101,7 @@ POST /api/getSpecificUser
 
 <Note>
   **Authentication required.** Include a valid JWT in the `Authorization` header:
-  ```
+  ```http
   Authorization: Bearer <authToken>
   ```
 </Note>
@@ -175,7 +175,7 @@ curl -X POST https://your-api-host/api/getSpecificUser \
 
 Returns the profile of the user who owns the bearer token attached to the request. The identity is decoded directly from the JWT payload — no request body is needed.
 
-```
+```http
 POST /api/getCurrentUser
 ```
 
@@ -183,7 +183,7 @@ POST /api/getCurrentUser
 
 <Note>
   **Authentication required.** The caller's identity is derived entirely from the JWT in the `Authorization` header — no body payload is needed.
-  ```
+  ```http
   Authorization: Bearer <authToken>
   ```
 </Note>

@@ -1,12 +1,12 @@
 ---
-title: "POST /api/deleteUser — soft-delete a user account"
+title: "POST /api/deleteUser — soft-delete a user account by ID"
 sidebarTitle: "Delete User"
-description: "Soft-deletes a user account by setting is_deleted=1 and recording the deleting user's ID and the deletion timestamp. The record is retained in the database."
+description: "Soft-deletes a user account by setting is_deleted=1, recording the deleting user's ID and deletion timestamp. The record is retained in the database."
 ---
 
 The `deleteUser` endpoint performs a **soft delete** — it does not permanently remove the user record from the database. Instead, the target user's `is_deleted` flag is set to `1`, and the fields `deleted_by` (set to the caller's user ID) and `deleted_on` (set to the current UTC timestamp) are recorded for auditing purposes. Soft-deleted users will no longer appear in `getAllUsers` results and cannot log in. The operation requires a valid bearer token and will reject callers whose token cannot be validated.
 
-```
+```http
 POST /api/deleteUser
 ```
 
@@ -14,7 +14,7 @@ POST /api/deleteUser
 
 <Note>
   **Authentication required.** Include a valid JWT in the `Authorization` header:
-  ```
+  ```http
   Authorization: Bearer <authToken>
   ```
   The ID of the authenticated caller is automatically recorded in `deleted_by` on the target user's record.
@@ -122,8 +122,8 @@ curl -X POST https://your-api-host/api/deleteUser \
 
 ## Error Codes
 
-| `returnCode` | Name           | Description                                                                                    |
-|--------------|----------------|------------------------------------------------------------------------------------------------|
-| `0`          | `SUCCESS`      | User was soft-deleted successfully.                                                            |
-| `4`          | `UNAUTHORIZED` | The bearer token was absent, expired, or invalid. Returned as an HTTP `401` response.          |
-| `10`         | `NOT_FOUND`    | No active user with the given ID exists — the user was already deleted or the ID is invalid.   |
+| `returnCode` / HTTP status | Name           | Description                                                                                          |
+|----------------------------|----------------|------------------------------------------------------------------------------------------------------|
+| `0` / `200`                | `SUCCESS`      | User was soft-deleted successfully.                                                                  |
+| `401 Unauthorized` (HTTP)  | —              | The bearer token was absent, expired, or invalid. FastAPI returns an HTTP `401` — no `APIResponse`. |
+| `10` / `200`               | `NOT_FOUND`    | No active user with the given ID exists — the user was already deleted or the ID is invalid.         |
